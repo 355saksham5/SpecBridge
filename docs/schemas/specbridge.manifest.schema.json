@@ -1,0 +1,275 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://api.specbridge.io/schemas/specbridge.manifest.schema.json",
+  "title": "SpecBridge Plugin Manifest",
+  "description": "Contract between SpecBridge API and custom Cursor plugin for brownfield onboarding bundle",
+  "type": "object",
+  "required": [
+    "specbridgeVersion",
+    "jobId",
+    "generatedAt",
+    "repository",
+    "sddKit",
+    "knowledge",
+    "files"
+  ],
+  "properties": {
+    "specbridgeVersion": {
+      "type": "string",
+      "description": "SpecBridge manifest schema version (semver)",
+      "pattern": "^\\d+\\.\\d+(\\.\\d+)?$",
+      "example": "1.0"
+    },
+    "jobId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Unique brownfield job identifier"
+    },
+    "generatedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp of bundle generation"
+    },
+    "repository": {
+      "type": "object",
+      "required": ["repoUrl", "headSha", "branch"],
+      "properties": {
+        "repoUrl": {
+          "type": "string",
+          "format": "uri",
+          "description": "GitHub HTTPS URL",
+          "example": "https://github.com/org/legacy-app"
+        },
+        "headSha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$",
+          "description": "Git commit SHA at time of processing"
+        },
+        "branch": {
+          "type": "string",
+          "description": "Branch name processed",
+          "example": "main"
+        }
+      }
+    },
+    "sddKit": {
+      "type": "object",
+      "required": ["id", "version", "vendoredAt"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "SDD kit identifier",
+          "example": "csharp-sdd-starter-kit"
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+\\.\\d+$",
+          "description": "SDD kit semver version",
+          "example": "1.0.0"
+        },
+        "vendoredAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp kit was vendored into bundle"
+        }
+      }
+    },
+    "knowledge": {
+      "type": "object",
+      "required": [
+        "granularityPrompt",
+        "tokenEstimateStart",
+        "tokenEstimateEnd",
+        "tokenReduction",
+        "shardCount",
+        "commitDepth",
+        "commitsProcessed",
+        "commitsSkipped"
+      ],
+      "properties": {
+        "granularityPrompt": {
+          "type": "string",
+          "enum": [
+            "tokenize_function",
+            "tokenize_class",
+            "tokenize_namespace",
+            "tokenize_features",
+            "tokenize_top_level_rules",
+            "tokenize_file"
+          ],
+          "description": "Tokenization granularity used"
+        },
+        "advisorPrompt": {
+          "type": "string",
+          "nullable": true,
+          "description": "Custom advisor prompt (if provided)"
+        },
+        "tokenEstimateStart": {
+          "type": "integer",
+          "description": "Total token estimate at HEAD (before commit walk)",
+          "minimum": 0
+        },
+        "tokenEstimateEnd": {
+          "type": "integer",
+          "description": "Final token estimate after all improvements",
+          "minimum": 0
+        },
+        "tokenReduction": {
+          "type": "string",
+          "pattern": "^\\d+(\\.\\d+)?%$",
+          "description": "Percentage token reduction",
+          "example": "43%"
+        },
+        "shardCount": {
+          "type": "integer",
+          "description": "Total number of tokenized shards",
+          "minimum": 0
+        },
+        "commitDepth": {
+          "type": "integer",
+          "description": "Number of commits walked",
+          "minimum": 1
+        },
+        "commitsProcessed": {
+          "type": "integer",
+          "description": "Commits with Jira keys that were processed",
+          "minimum": 0
+        },
+        "commitsSkipped": {
+          "type": "integer",
+          "description": "Commits without Jira keys (skipped)",
+          "minimum": 0
+        },
+        "meanQaScore": {
+          "type": "number",
+          "format": "float",
+          "nullable": true,
+          "description": "Mean QA score across all commits (0.0 - 1.0)",
+          "minimum": 0.0,
+          "maximum": 1.0
+        },
+        "calibrationOverlapMean": {
+          "type": "number",
+          "format": "float",
+          "nullable": true,
+          "description": "Mean calibration overlap (0.0 - 1.0)",
+          "minimum": 0.0,
+          "maximum": 1.0
+        }
+      }
+    },
+    "files": {
+      "type": "object",
+      "required": ["sddKit", "truthDocs", "knowledgeShards"],
+      "properties": {
+        "sddKit": {
+          "type": "array",
+          "description": "SDD kit files (.cursor/, AGENTS.md, USAGE_GUIDE.md)",
+          "items": {
+            "$ref": "#/definitions/BundleFile"
+          },
+          "minItems": 1
+        },
+        "truthDocs": {
+          "type": "array",
+          "description": "Truth documents (project_knowledge.md, project_deployment_knowledge.md)",
+          "items": {
+            "$ref": "#/definitions/BundleFile"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "knowledgeShards": {
+          "type": "array",
+          "description": "Tokenized knowledge shards + manifest.json",
+          "items": {
+            "$ref": "#/definitions/BundleFile"
+          },
+          "minItems": 1
+        },
+        "retroFeatures": {
+          "type": "array",
+          "description": "Retrospective feature_spec.md per Jira commit",
+          "items": {
+            "$ref": "#/definitions/BundleFile"
+          }
+        },
+        "reports": {
+          "type": "array",
+          "description": "Quality reports (onboarding-{jobId}.json)",
+          "items": {
+            "$ref": "#/definitions/BundleFile"
+          }
+        }
+      }
+    },
+    "pullRequest": {
+      "type": "object",
+      "nullable": true,
+      "description": "PR info if delivery.openPr=true",
+      "required": ["url", "number", "branch"],
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "description": "GitHub PR URL"
+        },
+        "number": {
+          "type": "integer",
+          "description": "PR number",
+          "minimum": 1
+        },
+        "branch": {
+          "type": "string",
+          "description": "PR branch name",
+          "pattern": "^sdd/onboarding/[0-9a-f\\-]+$"
+        }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Optional metadata for plugin use",
+      "properties": {
+        "organizationId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "SpecBridge organization ID"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Custom tags"
+        }
+      }
+    }
+  },
+  "definitions": {
+    "BundleFile": {
+      "type": "object",
+      "required": ["path", "sha256", "sizeBytes"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Relative path within bundle (ZIP extraction target)",
+          "example": ".cursor/rules/dotnet-standards.mdc"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "SHA-256 hash of file content"
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "description": "File size in bytes",
+          "minimum": 0
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable file description (optional)"
+        }
+      }
+    }
+  }
+}

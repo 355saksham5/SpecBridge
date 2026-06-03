@@ -1,0 +1,14 @@
+{
+  "name": "@specbridge/fake-worker",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Phase 0 fake worker - emits SSE events to validate OpenAPI contract",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {},
+  "engines": {
+    "node": ">=20"
+  }
+}

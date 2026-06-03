@@ -1,0 +1,1018 @@
+openapi: 3.1.0
+info:
+  title: SpecBridge API
+  version: 1.0.0
+  description: |
+    SpecBridge makes any brownfield GitHub repository SDD-ready using Cursor Cloud Agents,
+    commit-history calibration, and tokenized knowledge bundles.
+    
+    **Architecture**: Azure-hosted .NET 10 + TypeScript platform
+    
+    **Product capabilities**:
+    - Bootstrap council-v2 truth docs + tokenized shards (6 granularity modes)
+    - Walk commit history with Jira enrichment
+    - Run 6 designated agents per commit for iterative quality improvement
+    - Deliver ZIP bundle for Cursor plugin OR optional PR
+    
+  contact:
+    name: SpecBridge API Support
+    email: api@specbridge.local
+  license:
+    name: Proprietary
+
+servers:
+  - url: https://api.specbridge.io/v1
+    description: Production
+  - url: https://api-staging.specbridge.io/v1
+    description: Staging
+  - url: http://localhost:5000/v1
+    description: Local Development
+
+tags:
+  - name: Integrations
+    description: Setup connections (Cursor, GitHub, Jira, Confluence)
+  - name: SDD Kits
+    description: SDD kit registry and versioning
+  - name: Brownfield Jobs
+    description: Core brownfield onboarding job operations
+
+security:
+  - EntraBearer: []
+
+paths:
+  # ===== INTEGRATIONS =====
+  
+  /integrations/cursor:
+    put:
+      tags: [Integrations]
+      summary: Register or update Cursor API key
+      description: |
+        Stores Cursor API key as Key Vault secret reference.
+        Never returns the raw key in responses or logs.
+      operationId: putCursorCredential
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [apiKey]
+              properties:
+                apiKey:
+                  type: string
+                  format: password
+                  description: Cursor API key from Dashboard → Integrations
+                  example: "sk_cur_..."
+                name:
+                  type: string
+                  description: Optional friendly name for this credential
+                  example: "Production Cursor Key"
+      responses:
+        '200':
+          description: Credential registered successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CursorCredential'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /integrations/cursor/{id}:
+    delete:
+      tags: [Integrations]
+      summary: Remove Cursor credential
+      operationId: deleteCursorCredential
+      parameters:
+        - $ref: '#/components/parameters/CredentialId'
+      responses:
+        '204':
+          description: Credential removed successfully
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /integrations/github/install:
+    post:
+      tags: [Integrations]
+      summary: GitHub App installation callback
+      description: |
+        Called by GitHub App after installation.
+        Supports github.com and GHES via apiBaseUrl.
+      operationId: installGitHub
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [installationId, webUrl]
+              properties:
+                installationId:
+                  type: integer
+                  format: int64
+                  example: 12345678
+                webUrl:
+                  type: string
+                  format: uri
+                  description: GitHub host URL
+                  example: "https://github.com"
+                apiBaseUrl:
+                  type: string
+                  format: uri
+                  description: API base URL (for GHES). Defaults to https://api.github.com for github.com
+                  example: "https://ghes.company.com/api/v3"
+                hostType:
+                  type: string
+                  enum: [github.com, ghes]
+                  default: github.com
+      responses:
+        '201':
+          description: GitHub connection created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GitHubConnection'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /integrations/github:
+    get:
+      tags: [Integrations]
+      summary: List GitHub connections
+      operationId: listGitHubConnections
+      responses:
+        '200':
+          description: List of GitHub connections
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  connections:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/GitHubConnection'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /integrations/jira/connect:
+    post:
+      tags: [Integrations]
+      summary: Connect Jira via Atlassian OAuth
+      description: |
+        Exchange OAuth code for access/refresh tokens.
+        Tokens stored in Key Vault.
+      operationId: connectJira
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, redirectUri]
+              properties:
+                code:
+                  type: string
+                  description: OAuth authorization code
+                redirectUri:
+                  type: string
+                  format: uri
+                  description: OAuth redirect URI
+                baseUrl:
+                  type: string
+                  format: uri
+                  description: Jira instance base URL
+                  example: "https://myorg.atlassian.net"
+      responses:
+        '201':
+          description: Jira connection created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JiraConnection'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /integrations/confluence/connect:
+    post:
+      tags: [Integrations]
+      summary: Connect Confluence via Atlassian OAuth
+      operationId: connectConfluence
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, redirectUri]
+              properties:
+                code:
+                  type: string
+                redirectUri:
+                  type: string
+                  format: uri
+                baseUrl:
+                  type: string
+                  format: uri
+                  example: "https://myorg.atlassian.net/wiki"
+      responses:
+        '201':
+          description: Confluence connection created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfluenceConnection'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ===== SDD KITS =====
+  
+  /sdd-kits:
+    get:
+      tags: [SDD Kits]
+      summary: List available SDD kits
+      description: Returns pinned kit versions. Default: csharp-sdd-starter-kit@1.0.0
+      operationId: listSddKits
+      responses:
+        '200':
+          description: List of available kits
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  kits:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SddKit'
+
+  /sdd-kits/{kitId}:
+    get:
+      tags: [SDD Kits]
+      summary: Get SDD kit metadata
+      operationId: getSddKit
+      parameters:
+        - name: kitId
+          in: path
+          required: true
+          schema:
+            type: string
+          example: "csharp-sdd-starter-kit"
+      responses:
+        '200':
+          description: Kit metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SddKitDetail'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ===== BROWNFIELD JOBS =====
+  
+  /brownfield-jobs:
+    post:
+      tags: [Brownfield Jobs]
+      summary: Create brownfield onboarding job
+      description: |
+        Enqueues a job to make a brownfield repo SDD-ready.
+        Returns 202 Accepted with jobId immediately.
+      operationId: createBrownfieldJob
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBrownfieldJobRequest'
+      responses:
+        '202':
+          description: Job accepted and enqueued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrownfieldJobCreated'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Duplicate active job for same repoUrl + branch
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+    get:
+      tags: [Brownfield Jobs]
+      summary: List brownfield jobs
+      description: Cursor-based pagination, filterable by status and repoUrl
+      operationId: listBrownfieldJobs
+      parameters:
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/JobStatus'
+        - name: repoUrl
+          in: query
+          schema:
+            type: string
+        - name: cursor
+          in: query
+          schema:
+            type: string
+          description: Pagination cursor from previous response
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: List of jobs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  jobs:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/BrownfieldJobSummary'
+                  nextCursor:
+                    type: string
+                    nullable: true
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /brownfield-jobs/{id}:
+    get:
+      tags: [Brownfield Jobs]
+      summary: Get job detail
+      operationId: getBrownfieldJob
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+      responses:
+        '200':
+          description: Job detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrownfieldJobDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /brownfield-jobs/{id}/events:
+    get:
+      tags: [Brownfield Jobs]
+      summary: Job events stream (SSE)
+      description: |
+        Server-Sent Events stream for real-time job progress.
+        Accepts ?token=... for browser EventSource clients.
+      operationId: getBrownfieldJobEvents
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+        - name: token
+          in: query
+          schema:
+            type: string
+          description: JWT token for EventSource clients (optional if Authorization header present)
+      responses:
+        '200':
+          description: SSE stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: |
+                  Event types: phase_started, agent_started, agent_completed, 
+                  agent_handoff_written, commit_skipped, shard_written, 
+                  audit_verdict, bundle_ready, job_completed, job_failed
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /brownfield-jobs/{id}/bundle:
+    get:
+      tags: [Brownfield Jobs]
+      summary: Download bundle ZIP
+      description: |
+        Returns 302 redirect to 30-min read-only Azure Blob SAS URL.
+        Re-call this endpoint for a fresh URL after expiry.
+      operationId: getBrownfieldJobBundle
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+      responses:
+        '302':
+          description: Redirect to blob SAS URL
+          headers:
+            Location:
+              schema:
+                type: string
+                format: uri
+              description: Azure Blob SAS URL (30-min TTL)
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Job not yet completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /brownfield-jobs/{id}/report:
+    get:
+      tags: [Brownfield Jobs]
+      summary: Get quality report
+      description: Per-commit token curve, QA scores, calibration overlap
+      operationId: getBrownfieldJobReport
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+      responses:
+        '200':
+          description: Quality report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QualityReport'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /brownfield-jobs/{id}/cancel:
+    post:
+      tags: [Brownfield Jobs]
+      summary: Cancel job
+      description: |
+        Cancel in-flight Cursor agent runs.
+        Partial artifacts preserved in blob for inspection.
+      operationId: cancelBrownfieldJob
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+      responses:
+        '202':
+          description: Cancel request accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  jobId:
+                    type: string
+                    format: uuid
+                  status:
+                    type: string
+                    enum: [cancelling]
+                  message:
+                    type: string
+                    example: "Job cancel request accepted. In-flight agents will be terminated."
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Job already completed or cancelled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+# ===== COMPONENTS =====
+
+components:
+  securitySchemes:
+    EntraBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Microsoft Entra ID JWT token
+
+  parameters:
+    JobId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Brownfield job ID
+
+    CredentialId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Credential ID
+
+  schemas:
+    # ----- Integrations -----
+    
+    CursorCredential:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+        name:
+          type: string
+          nullable: true
+        last4:
+          type: string
+          description: Last 4 characters of API key (for UI display)
+          example: "ab12"
+        createdAt:
+          type: string
+          format: date-time
+
+    GitHubConnection:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+        hostType:
+          type: string
+          enum: [github.com, ghes]
+        webUrl:
+          type: string
+          format: uri
+        apiBaseUrl:
+          type: string
+          format: uri
+        installationId:
+          type: integer
+          format: int64
+        scopes:
+          type: array
+          items:
+            type: string
+          example: ["contents:read", "pull_requests:write", "metadata:read"]
+        createdAt:
+          type: string
+          format: date-time
+
+    JiraConnection:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+        baseUrl:
+          type: string
+          format: uri
+        createdAt:
+          type: string
+          format: date-time
+
+    ConfluenceConnection:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+        baseUrl:
+          type: string
+          format: uri
+        createdAt:
+          type: string
+          format: date-time
+
+    # ----- SDD Kits -----
+    
+    SddKit:
+      type: object
+      properties:
+        id:
+          type: string
+          example: "csharp-sdd-starter-kit"
+        version:
+          type: string
+          example: "1.0.0"
+        isDefault:
+          type: boolean
+        description:
+          type: string
+
+    SddKitDetail:
+      allOf:
+        - $ref: '#/components/schemas/SddKit'
+        - type: object
+          properties:
+            manifestHash:
+              type: string
+              description: SHA-256 hash of kit manifest
+            fileCount:
+              type: integer
+            files:
+              type: array
+              items:
+                type: object
+                properties:
+                  path:
+                    type: string
+                  sha256:
+                    type: string
+
+    # ----- Brownfield Jobs -----
+    
+    CreateBrownfieldJobRequest:
+      type: object
+      required: [repoUrl, githubConnectionId, cursorCredentialId]
+      properties:
+        repoUrl:
+          type: string
+          format: uri
+          description: GitHub HTTPS URL (github.com or registered GHES)
+          example: "https://github.com/org/legacy-app"
+        githubConnectionId:
+          type: string
+          format: uuid
+        defaultBranch:
+          type: string
+          nullable: true
+          example: "main"
+        cursorCredentialId:
+          type: string
+          format: uuid
+        sddKitId:
+          type: string
+          default: "csharp-sdd-starter-kit"
+        sddKitVersion:
+          type: string
+          nullable: true
+          description: Defaults to latest stable
+          example: "1.0.0"
+        history:
+          type: object
+          properties:
+            commitDepth:
+              type: integer
+              minimum: 1
+              maximum: 500
+              default: 50
+            walkOrder:
+              type: string
+              enum: [oldest_first, newest_first]
+              default: oldest_first
+        jira:
+          type: object
+          nullable: true
+          properties:
+            connectionId:
+              type: string
+              format: uuid
+            issueKeyPattern:
+              type: string
+              default: "ITDIGIT-\\d+"
+              example: "PROJ-\\d+"
+            extractFrom:
+              type: array
+              items:
+                type: string
+                enum: [commit_message, branch_name]
+              default: ["commit_message"]
+        knowledge:
+          type: object
+          required: [granularityPrompt]
+          properties:
+            granularityPrompt:
+              type: string
+              enum: 
+                - tokenize_function
+                - tokenize_class
+                - tokenize_namespace
+                - tokenize_features
+                - tokenize_top_level_rules
+                - tokenize_file
+            advisorPrompt:
+              type: string
+              nullable: true
+              example: "Focus on auth and data boundaries only"
+            includeConfluencePageIds:
+              type: array
+              items:
+                type: string
+              nullable: true
+            excludePathPatterns:
+              type: array
+              items:
+                type: string
+              default: ["**/bin/**", "**/obj/**", "**/.git/**", "**/node_modules/**"]
+            maxShardTokens:
+              type: integer
+              default: 800
+              minimum: 100
+              maximum: 5000
+        validation:
+          type: object
+          properties:
+            devilsAdvocateQuestionCount:
+              type: integer
+              minimum: 5
+              maximum: 30
+              default: 10
+            minAnswerScore:
+              type: number
+              format: float
+              minimum: 0.0
+              maximum: 1.0
+              default: 0.75
+            maxRoundsPerCommit:
+              type: integer
+              minimum: 1
+              maximum: 3
+              default: 1
+        delivery:
+          type: object
+          properties:
+            bundle:
+              type: boolean
+              default: true
+            openPr:
+              type: boolean
+              default: false
+            prTitle:
+              type: string
+              nullable: true
+              default: "chore(sdd): brownfield SDD onboarding via SpecBridge"
+            prBranch:
+              type: string
+              nullable: true
+        agents:
+          type: object
+          properties:
+            overrides:
+              type: object
+              additionalProperties:
+                type: object
+                properties:
+                  model:
+                    type: string
+                    example: "composer-2.5"
+
+    BrownfieldJobCreated:
+      type: object
+      properties:
+        jobId:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/JobStatus'
+        estimatedCommitsToProcess:
+          type: integer
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        _links:
+          type: object
+          properties:
+            self:
+              type: string
+              format: uri
+            events:
+              type: string
+              format: uri
+            bundle:
+              type: string
+              format: uri
+            report:
+              type: string
+              format: uri
+            cancel:
+              type: string
+              format: uri
+
+    BrownfieldJobSummary:
+      type: object
+      properties:
+        jobId:
+          type: string
+          format: uuid
+        repoUrl:
+          type: string
+          format: uri
+        status:
+          $ref: '#/components/schemas/JobStatus'
+        headSha:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    BrownfieldJobDetail:
+      allOf:
+        - $ref: '#/components/schemas/BrownfieldJobSummary'
+        - type: object
+          properties:
+            currentPhase:
+              type: string
+              nullable: true
+              example: "commit_walk"
+            currentAgentRole:
+              type: string
+              nullable: true
+              enum: 
+                - knowledge-architect
+                - feature-historian
+                - commit-calibrator
+                - question-prober
+                - knowledge-curator
+                - knowledge-auditor
+            currentCommitSha:
+              type: string
+              nullable: true
+            commitsProcessed:
+              type: integer
+            commitsSkipped:
+              type: integer
+            commitsRemaining:
+              type: integer
+              nullable: true
+            metrics:
+              type: object
+              nullable: true
+              properties:
+                tokenEstimateStart:
+                  type: integer
+                tokenEstimateCurrent:
+                  type: integer
+                meanQaScore:
+                  type: number
+                  format: float
+                  nullable: true
+            prUrl:
+              type: string
+              format: uri
+              nullable: true
+
+    JobStatus:
+      type: string
+      enum:
+        - queued
+        - cloning
+        - stack_detect
+        - knowledge_bootstrap
+        - commit_walk
+        - validation
+        - bundle_packaging
+        - pr_opened
+        - completed
+        - failed
+        - cancelled
+
+    QualityReport:
+      type: object
+      properties:
+        jobId:
+          type: string
+          format: uuid
+        repoUrl:
+          type: string
+          format: uri
+        headSha:
+          type: string
+        sddKit:
+          type: object
+          properties:
+            id:
+              type: string
+            version:
+              type: string
+        tokenCurve:
+          type: array
+          description: Per-commit token progression (oldest → newest)
+          items:
+            type: object
+            properties:
+              commitSha:
+                type: string
+              tokenEstimate:
+                type: integer
+              qaScore:
+                type: number
+                format: float
+                nullable: true
+        tokenEstimateStart:
+          type: integer
+        tokenEstimateEnd:
+          type: integer
+        tokenReduction:
+          type: string
+          example: "43%"
+        meanQaScore:
+          type: number
+          format: float
+        calibrationOverlapMean:
+          type: number
+          format: float
+        commitsProcessed:
+          type: integer
+        commitsSkipped:
+          type: integer
+        patchesApproved:
+          type: integer
+        patchesRejected:
+          type: integer
+
+    ProblemDetails:
+      type: object
+      properties:
+        type:
+          type: string
+          format: uri
+          example: "https://api.specbridge.io/problems/validation-error"
+        title:
+          type: string
+          example: "Validation Error"
+        status:
+          type: integer
+          example: 400
+        detail:
+          type: string
+          example: "repoUrl must be a valid GitHub HTTPS URL"
+        instance:
+          type: string
+          format: uri
+          example: "/v1/brownfield-jobs"
+        errors:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+
+  responses:
+    ValidationError:
+      description: Validation error (FluentValidation ProblemDetails)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+
+    Unauthorized:
+      description: Missing or expired Entra ID token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+
+    Forbidden:
+      description: Insufficient permissions or tenant isolation violation
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
