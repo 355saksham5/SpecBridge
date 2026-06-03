@@ -1,0 +1,67 @@
+---
+description: C# / .NET coding standards for services and APIs in this repo
+globs: "**/*.cs,**/*.csproj,**/*.razor"
+alwaysApply: false
+---
+
+# .NET / C# Standards
+
+## Style & formatting
+
+- Follow the project's **`.editorconfig`** (indentation, line length, newlines, `using` ordering).
+- Use **`dotnet format`** and/or **StyleCop.Analyzers** / **Roslyn analyzers** per repo configuration; CI enforces no format drift.
+- Enable **Nullable Reference Types** (`<Nullable>enable</Nullable>` in `.csproj`); eliminate `#nullable disable` suppressions without justification.
+- Enable **`<TreatWarningsAsErrors>true</TreatWarningsAsErrors>`** in production project files to keep the build clean.
+
+## Naming conventions
+
+- **`PascalCase`** for classes, interfaces (`IFoo`), methods, properties, events, and public constants.
+- **`camelCase`** for local variables, method parameters, and private fields (optionally prefix private fields with `_` per team standard, e.g. `_userService`).
+- **`SCREAMING_SNAKE_CASE`** is discouraged in C#; use `public const string MaxLength = "…"` (PascalCase for constants).
+- Suffix interfaces with the contract name (`IUserRepository`), async methods with `Async` (`GetByIdAsync`), and `CancellationToken` parameters last.
+
+## Types & records
+
+- Prefer **`record`** or **`record class`** for immutable DTOs, value objects, and command/query objects; use `record struct` for small stack-allocated values.
+- Use **primary constructors** (C# 12+) for concise DI setup where appropriate.
+- Prefer **`IReadOnlyList<T>`** / **`IEnumerable<T>`** for return types unless mutation is required by the caller.
+
+## Errors & exceptions
+
+- Raise **specific exception types** (`ArgumentException`, `InvalidOperationException`, or custom domain exceptions); catch at boundaries (controller / middleware / job runner).
+- Log exceptions with **structured context** via `ILogger<T>`; never swallow silently.
+- Use **`Result<T, TError>`** pattern or problem-details responses for expected failures rather than relying on exception flow for control.
+
+```csharp
+// Avoid
+try { await SaveUserAsync(user); }
+catch (Exception) { /* swallowed */ }
+
+// Prefer
+try { await SaveUserAsync(user, cancellationToken); }
+catch (StorageException ex)
+{
+    _logger.LogError(ex, "User save failed for {UserId}", user.Id);
+    throw new ServiceUnavailableException("Unable to persist user.", ex);
+}
+```
+
+## Tests
+
+- Use **xUnit** (preferred), NUnit, or MSTest per project config; follow **Arrange / Act / Assert** structure.
+- Name tests as `MethodName_StateUnderTest_ExpectedBehavior` or `Given_When_Then` style consistently.
+- Use **`WebApplicationFactory<TProgram>`** for integration / API tests; isolate with an in-memory or test database.
+- Mock external dependencies with **Moq**, **NSubstitute**, or **FakeItEasy**; keep unit tests free of I/O.
+- Use **`[Theory]` + `[InlineData]`** / **`[MemberData]`** for table-driven / parameterized test cases.
+
+## Security hygiene
+
+- Never store secrets in source code; use `IConfiguration` bound from environment variables or a secrets manager.
+- Apply `[ValidateAntiForgeryToken]` for MVC forms; use `[ApiController]` + JWT for API routes.
+- Enable the **HTTPS redirection middleware** and **HSTS** in production (`UseHttpsRedirection`, `UseHsts`).
+
+## Performance
+
+- Use **`IAsyncEnumerable<T>`** for large streamed result sets to avoid buffering entire collections.
+- Use **`ArrayPool<T>`** / **`MemoryPool<T>`** and `Span<T>` / `Memory<T>` for hot paths that allocate frequently.
+- Profile with **dotnet-trace** / **dotnet-counters** and BenchmarkDotNet before premature optimization.

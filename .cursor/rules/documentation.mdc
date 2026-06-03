@@ -1,0 +1,31 @@
+---
+description: Documentation conventions for Angular, ASP.NET Core APIs, and SDD artifacts
+globs: "**/*.md,**/README*,**/openapi*.yaml,**/openapi*.json"
+alwaysApply: false
+---
+
+# Documentation Conventions
+
+## READMEs
+
+- Use sentence case for headings.
+- Include a **Quick Start** section that gets someone running in five minutes.
+- Code examples should be complete and runnable.
+
+## Code comments
+
+- **TypeScript / Angular:** Use **TSDoc** / JSDoc for exported public APIs when the project does so elsewhere.
+- **C# / .NET:** Use **XML doc comments** (`///`) on public types, methods, and properties per project standard; enable `<GenerateDocumentationFile>true</GenerateDocumentationFile>` in `.csproj` to include them in OpenAPI generation.
+- Document **why**, not **what**, in inline comments.
+- Do not comment obvious code.
+
+## API documentation
+
+- Use **OpenAPI 3.x** for HTTP APIs via **Swashbuckle** or **NSwag**; keep the generated spec aligned with controller/endpoint behavior and DTOs (**SDD**).
+- Annotate actions with `[ProducesResponseType]` and `///` XML comments so Swagger UI reflects accurate status codes and models.
+- Include example requests and responses.
+- Document **error** responses and status codes, not only success cases.
+
+## Specs and SDD
+
+- Feature specs and **`REQ-…`** traceability live in product-owned docs; link from PRs when required (see `specs-driven-design.mdc`).

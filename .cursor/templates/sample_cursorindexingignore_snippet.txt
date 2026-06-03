@@ -1,0 +1,3 @@
+# SDD completed entries — exclude from Cursor's index (if your Cursor version supports .cursorindexingignore)
+.sdd/features/completed/
+.sdd/tasks/completed.md

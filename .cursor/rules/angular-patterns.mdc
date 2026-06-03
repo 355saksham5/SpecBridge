@@ -1,0 +1,40 @@
+---
+description: Angular best practices for this project (standalone components, DI, performance, testing)
+globs: "**/*.ts,**/*.html,**/angular.json,**/tsconfig*.json"
+alwaysApply: false
+---
+
+# Angular Patterns
+
+## Structure
+
+- Prefer **standalone components** and explicit `imports` when that is the project standard; otherwise follow existing module layout.
+- Keep **smart vs presentational** split where the codebase already does: containers handle data/orchestration; dumb components take `@Input()` / `@Output()`.
+- **Lazy-load** feature routes; avoid importing heavy modules in `AppModule` / root unless required.
+
+## State & async
+
+- Prefer **Signals** or explicit **NgRx** patterns already in the repo—do not mix strategies in one feature without a reason.
+- Use **AsyncPipe** in templates where possible to avoid manual subscribe/unsubscribe leaks.
+- Choose RxJS operators deliberately: `switchMap` for cancellation, `exhaustMap` for duplicate-submit guards, `catchError` at stream boundaries.
+
+## Forms & validation
+
+- **Reactive forms** for non-trivial flows; sync validators with server rules where applicable.
+- Surface errors accessibly (ARIA, `aria-describedby`).
+
+## Security
+
+- **Never** bind untrusted HTML without sanitization; use Angular’s `DomSanitizer` only with trusted patterns.
+- Keep **tokens** out of logs and URLs when avoidable; align with `web-security.mdc`.
+
+## Performance
+
+- **`ChangeDetectionStrategy.OnPush`** for leaf/presentational components when safe.
+- Avoid heavy work in constructors; use lifecycle hooks or `effect()` / `computed()` as appropriate.
+- Respect **bundle budgets** in `angular.json`.
+
+## Testing
+
+- **Jest** or **Karma/Jasmine** per project config; **Cypress** or **Playwright** for critical e2e paths.
+- Test behaviors tied to **acceptance criteria**, not implementation trivia.

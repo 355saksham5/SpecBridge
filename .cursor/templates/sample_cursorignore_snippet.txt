@@ -1,0 +1,3 @@
+# SDD completed entries — human reference only, not for AI context
+.sdd/features/completed/
+.sdd/tasks/completed.md

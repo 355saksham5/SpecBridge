@@ -1,0 +1,143 @@
+---
+description: "SDD workflow orchestration — enforces stepped artifact generation with mandatory review gates between steps"
+globs: "output/**,.sdd/**,**/feature_spec.md,**/plan.md,**/stories.md,**/backlog.md,**/requirements.md,**/svs.md,**/*.task.md"
+alwaysApply: false
+---
+
+# SDD Workflow Orchestration (Mandatory)
+
+This rule enforces a **stepped, gated workflow** for generating SDD artifacts. The agent MUST produce only one step's output per response and MUST NOT proceed to the next step without explicit user confirmation.
+
+## Steps and Gates
+
+### Step 1 — Feature Spec
+
+**Trigger:** User describes a problem, feature, initiative, or objective.
+
+**Output:** `feature_spec.md` ONLY — containing:
+- Problem statement
+- Goals / non-goals
+- Constraints
+- User acceptance criteria
+- Conceptual APIs (if applicable)
+- Observability considerations
+- Key assumptions
+
+**Gate:** After generating the feature spec, STOP and present it for review:
+> "Feature spec is ready for review. Please review and confirm before I proceed to requirement IDs and backlog stories. If changes are needed, let me know."
+
+**Hard rule:** Do NOT generate requirement IDs, stories, SVS, plans, tasks, Confluence artifacts, or Jira structures in this step. Only the feature spec.
+
+---
+
+### Step 2 — Backlog (REQ IDs + SVS + Stories)
+
+**Trigger:** User explicitly confirms the feature spec (e.g. "approved", "looks good", "proceed", "go ahead").
+
+**Output:**
+- `requirements.md` — Stable `REQ-…` IDs with titles and scope
+- `svs.md` — Sprint-sized Slice(s) with traceability
+- `stories.md` — User stories per SVS with Gherkin AC, NFRs, dependencies, risks
+
+Use templates: `templates/svs_template.md`, `templates/story_template.md`, `templates/acceptance_criteria_gherkin.md`.
+
+**Gate:** After generating backlog artifacts, STOP and present for review:
+> "Backlog artifacts (requirements, SVS, and stories) are ready for review. Please review and confirm before I proceed to the implementation plan."
+
+**Hard rule:** Do NOT generate plan/tasks, Confluence, or Jira artifacts in this step.
+
+---
+
+### Step 3 — Plan / Tasks
+
+**Trigger:** User explicitly confirms the backlog artifacts.
+
+**Output:**
+- `plan.md` — Implementation plan with task breakdown, dependencies, deployment order, risk register
+
+**Gate:** After generating the plan, STOP and present for review:
+> "Implementation plan is ready for review. Please review and confirm before I proceed to publishing artifacts (Confluence/Jira)."
+
+---
+
+### Step 4 — Publishing Artifacts (optional)
+
+**Trigger:** User explicitly requests Confluence or Jira output.
+
+**Output (one or both, as requested):**
+- `initiative_confluence.md` — Confluence initiative document (use `templates/initiative_confluence_skeleton.md`)
+- Jira YAML/JSON — Epic/Story/Task hierarchy (use `skills/jira-epic-story-task-automation/SKILL.md`)
+
+**Gate:** Present for review before any MCP publish action.
+
+---
+
+### Step 5 — Per-story implementation (runs outside the gated artefact loop)
+
+`/start-story <feature> <STORY-ID> [--mode task|direct]` → implement → `/finish-story <feature> <STORY-ID>`. See individual command files for detail.
+
+### Lightweight task / bug flow (no SDD ceremony)
+
+`/start-task "<desc>"` → implement → `/finish-task <task-identifier>`.
+
+---
+
+## Rules (always enforced)
+
+1. **One step per response.** Never combine Step 1 + Step 2 output in a single response, even if the user's prompt contains enough detail for multiple steps.
+
+2. **Never assume approval.** Phrases like "here's everything" or "I'll also generate the stories" are violations. Always wait for explicit confirmation.
+
+3. **Confirmation keywords.** Treat the following as explicit step approval: "approved", "confirmed", "looks good", "proceed", "go ahead", "next step", "continue", "yes", "LGTM". If ambiguous, ask: "Should I proceed to Step N?"
+
+4. **Skip-ahead escape hatch.** If the user explicitly requests multiple steps at once (e.g. "generate feature spec and stories together", "give me everything", "skip to plan"), honor that request but note which steps were combined. This is the ONLY exception to the one-step rule.
+
+5. **Step detection.** At the start of each response, determine which step the user is in:
+   - No existing artifacts in output directory → Step 1
+   - Feature spec exists but not confirmed → Present spec for review
+   - Feature spec confirmed, no backlog → Step 2
+   - Backlog confirmed, no plan → Step 3
+   - Plan confirmed → Step 4 (only if requested)
+
+6. **Output location.** All generated files MUST be written to the output directory defined in `output-config.mdc`. Never write to arbitrary locations outside the workspace.
+
+---
+
+## Step Summary Table
+
+| Step | Agent(s) | Input Required | Output Files | Gate |
+|------|----------|---------------|--------------|------|
+| 1. Feature Spec | SDD rule | Problem statement | `feature_spec.md` | User confirms |
+| 2. Backlog | `backlog_architect` | Approved feature spec | `requirements.md`, `svs.md`, `stories.md` | User confirms |
+| 3. Plan | SDD rule | Approved backlog | `plan.md` | User confirms |
+| 4. Publish | `epic_initiative_confluence`, Jira skill | Approved plan | `initiative_confluence.md`, Jira YAML | User confirms |
+
+---
+
+## Standalone Agent Usage (outside the workflow)
+
+The stepped workflow above governs **artifact generation** only. The following agents can be invoked **independently at any time**, at any step, without advancing the workflow:
+
+| Agent | How to invoke | When to use |
+|-------|--------------|-------------|
+| [`technical_analyst`](../agents/technical_analyst.md) | `@.cursor/agents/technical_analyst.md` | Before or after any step — assess feasibility, complexity, and risks for the current artifacts |
+| [`technical-devils-advocate`](../agents/technical-devils-advocate.md) | `@.cursor/agents/technical-devils-advocate.md` | Before or after any step — challenge assumptions, surface edge cases, stress-test the current artifacts |
+| [`doc_review_assistant`](../agents/doc_review_assistant.md) | `@.cursor/agents/doc_review_assistant.md` | After implementation — verify PRs against acceptance criteria, generate release notes |
+| [`backlog_architect`](../agents/backlog_architect.md) | `@.cursor/agents/backlog_architect.md` | Directly, if you already have a confirmed spec and want to skip Step 1 |
+
+**Rules for standalone usage:**
+- When you `@`-mention an agent directly, that agent runs — the workflow does NOT block it.
+- Standalone agent output does not advance the workflow step. For example, running `technical_analyst` after Step 1 does not move you to Step 2.
+- You can run multiple standalone agents between steps (e.g. run both `technical_analyst` and `technical-devils-advocate` after Step 1 before confirming to proceed to Step 2).
+- If you don't want to use the stepped workflow at all, simply invoke agents directly by `@`-mentioning them. The workflow gates only activate when the agent is generating SDD artifacts (feature specs, stories, plans) without a specific agent being invoked.
+
+---
+
+## Anti-Patterns
+
+- Generating stories in the same response as the feature spec
+- Generating a plan before stories are reviewed
+- Generating Jira/Confluence artifacts without being asked
+- Assuming the user wants all steps because they gave a detailed prompt
+- Writing files outside the configured output directory
+- Blocking a standalone agent invocation because "the workflow hasn't reached that step"

@@ -1,0 +1,150 @@
+---
+description: Angular and TypeScript coding standards (components, templates, signals, forms, accessibility, lifecycle).
+globs: "**/*.{ts,html,scss,css}"
+alwaysApply: false
+---
+
+# Angular Standards
+
+Coding standards for Angular and TypeScript in this workspace. **Architecture** (feature layering, global state strategy between Signals and NgRx, security boundaries, bundle budgets, test runners) lives in [`angular-patterns.mdc`](angular-patterns.mdc).
+
+## TypeScript
+
+- **Strict type checking:** Enable and adhere to strict mode in `tsconfig` for this project.
+- **Prefer type inference** when the type is obvious from context (avoid redundant annotations).
+- **Avoid `any`:** Prefer `unknown` and narrow at boundaries when the type is uncertain.
+
+Prefer inference over redundant annotations:
+
+```typescript
+// Bad
+let name: string = 'Angular';
+
+// Good
+let name = 'Angular';
+```
+
+## Components and modules
+
+- **Standalone:** Use standalone components, directives, and pipes. Avoid new `NgModule`-based features; refactor existing modules toward standalone when touching them.
+- **Implicit standalone:** Do not set `standalone: true` explicitly in `@Component` / `@Directive` / `@Pipe` when it is the default for your Angular version.
+- **Lazy loading:** Lazy-load feature routes to keep initial load small; avoid heavy imports in the app root unless required.
+- **`NgOptimizedImage`:** Use it for static images where applicable.
+- **Host bindings:** Do not use `@HostBinding` / `@HostListener`; use the `host` object on `@Component` / `@Directive` instead.
+- **Single responsibility:** Keep components small and focused.
+- **`input()` and `output()`:** Prefer `input()` / `output()` over `@Input()` / `@Output()` for new and heavily edited components.
+- **`computed()`:** Use `computed()` for state derived from signals.
+- **`ChangeDetectionStrategy.OnPush`:** Set `changeDetection: ChangeDetectionStrategy.OnPush` on components unless a documented exception applies.
+- **Templates:** Prefer inline `template: \`...\`` for small components; use external HTML for large templates.
+- **Reactive forms:** Prefer reactive forms for non-trivial flows, validation, and dynamic controls.
+- **Validators and accessibility:** Sync validators with server rules where applicable. Surface errors accessibly (ARIA, `aria-describedby`).
+- **Styling in templates:** Do not use `ngClass` / `NgClass` or `ngStyle` / `NgStyle`; use native `[class.foo]`, `[class]`, `[style.font-size.px]`, or `[style]` bindings.
+
+Standalone: avoid redundant `standalone: true` when it is implied:
+
+```typescript
+// Bad
+@Component({
+  standalone: true,
+  // ...
+})
+export class MyComponent {}
+
+// Good
+@Component({
+  // `standalone: true` is implied
+  // ...
+})
+export class MyComponent {}
+```
+
+`input()` / `output()` instead of decorator inputs/outputs:
+
+```typescript
+// Old decorator style
+@Input() userId!: string;
+@Output() userSelected = new EventEmitter<string>();
+```
+
+```typescript
+// Preferred: signal-based APIs
+import { input, output } from '@angular/core';
+
+// ...
+userId = input<string>('');
+userSelected = output<string>();
+```
+
+Prefer native class and style bindings over `NgClass` / `NgStyle`:
+
+```html
+<!-- Bad -->
+<section [ngClass]="{'active': isActive}"></section>
+<section [ngStyle]="{'font-size': fontSize + 'px'}"></section>
+```
+
+```html
+<!-- Good -->
+<section [class.active]="isActive"></section>
+<section [class]="{'active': isActive}"></section>
+<section [class]="myClasses"></section>
+<section [style.font-size.px]="fontSize"></section>
+<section [style]="myStyles"></section>
+```
+
+## State management
+
+- **Signals:** Use signals for local component state and reactive updates where appropriate.
+- **Pure transformations:** Keep signal-derived logic as pure, predictable updates (no hidden side effects in `computed()` readers).
+- **Pure updates:** Use `update()` / `set()` on writable signals—do not use `mutate()`.
+
+## Templates
+
+- Keep templates simple; move non-trivial logic to the class.
+- **Control flow:** Prefer `@if`, `@for`, and `@switch` over `*ngIf`, `*ngFor`, and `*ngSwitch`.
+- **Observables in templates:** Use the `async` pipe so subscriptions are managed automatically.
+
+Built-in control flow:
+
+```html
+<!-- Old -->
+<section *ngIf="isVisible">Content</section>
+<section *ngFor="let item of items">{{ item }}</section>
+```
+
+```html
+<!-- Preferred -->
+@if (isVisible) {
+  <section>Content</section>
+}
+@for (item of items; track item.id) {
+  <section>{{ item }}</section>
+}
+```
+
+## Lifecycle
+
+- Avoid heavy work in **constructors**; use lifecycle hooks, `effect()`, or `computed()` as appropriate.
+
+## Services
+
+- **Single responsibility** per service.
+- **`providedIn: 'root'`** for app-wide singletons when that matches the design.
+- **`inject()`:** Prefer `inject()` over constructor parameter injection when it improves readability (e.g. in `provide` functions, `computed`, or field initializers).
+
+Dependency injection style:
+
+```typescript
+// Constructor injection (acceptable; prefer inject() when it reads more clearly)
+constructor(private myService: MyService) {}
+```
+
+```typescript
+// Preferred in many cases: inject()
+import { inject } from '@angular/core';
+
+export class MyComponent {
+  private myService = inject(MyService);
+  // ...
+}
+```

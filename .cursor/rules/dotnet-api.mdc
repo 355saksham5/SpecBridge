@@ -1,0 +1,49 @@
+---
+description: ASP.NET Core HTTP API conventions (Web API controllers and Minimal API; REST status codes and validation)
+globs: "**/*.cs,**/*.csproj,**/appsettings*.json,**/Program.cs,**/Startup.cs"
+alwaysApply: false
+---
+
+# .NET API Conventions
+
+Assume **ASP.NET Core Web API** (.NET 9/10) with attribute-routed controllers or Minimal API endpoints—match existing project style.
+
+## Controller / endpoint design
+
+- Keep **action methods thin**; delegate to services or use-case handlers (MediatR, or plain service classes).
+- Use **explicit** route attributes, `[ApiController]`, `[ProducesResponseType]`, and `Produces<T>` for stable, self-documenting contracts.
+- Prefer **constructor injection** via `IServiceCollection` for repositories, services, and `IOptions<T>` settings.
+- Apply `[Authorize]` / policy-based authorization at the controller or action level; enforce business-rule checks inside services.
+
+## HTTP verbs & status codes
+
+- `GET` → **200** with body, or **404** when a single resource is missing.
+- `POST` → **201 Created** with `Location` header when creating a resource; **409 Conflict** for duplicates.
+- `PUT` / `PATCH` → **200** or **204 No Content**.
+- `DELETE` → **204** or **404**.
+- Use `ActionResult<T>` or `Results<T…>` (Minimal API) for typed returns and accurate OpenAPI generation.
+
+## Validation & models
+
+- Use **Data Annotations** (`[Required]`, `[MaxLength]`, `[Range]`) or **FluentValidation** for request models; `[ApiController]` triggers automatic 400 responses on model-state errors.
+- Use **record types** or dedicated request/response DTOs for API boundaries—never expose EF Core entities directly.
+- Version or extend DTOs for **backward-compatible** changes; document breaking changes in OpenAPI and release notes.
+- Validate input at the boundary; use `ModelState.IsValid` guards or action filters.
+
+## Errors
+
+- Return **Problem Details** (RFC 7807) for error responses using `ProblemDetails` or `ValidationProblemDetails`.
+- Map unexpected failures to appropriate **5xx** via global exception-handling middleware (`UseExceptionHandler` / `IProblemDetailsService`); never leak stack traces in production.
+- Register a consistent `IExceptionHandler` or use `app.UseExceptionHandler(...)` in `Program.cs`.
+
+## OpenAPI / Swagger
+
+- Use **Swashbuckle** (`Swashbuckle.AspNetCore`) or **NSwag** to generate / serve OpenAPI 3.x; keep spec aligned with live behavior (`specs-driven-design.mdc`).
+- Annotate with XML doc comments (`///`) and `[ProducesResponseType]` so the generated spec is accurate.
+- Include example requests and responses using `SwaggerRequestExample` / `SwaggerResponseExample` where relevant.
+
+## Minimal API (when used)
+
+- Group related endpoints with `RouteGroupBuilder` (`.MapGroup()`).
+- Prefer typed `Results<T, T>` returns for correct OpenAPI generation.
+- Use endpoint filters (`AddEndpointFilter`) for cross-cutting concerns instead of inline duplication.

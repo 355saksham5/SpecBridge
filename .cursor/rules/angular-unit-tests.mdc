@@ -1,0 +1,74 @@
+---
+description: "Enforces best practices for writing Angular unit tests (Arrange-Act-Assert, proper mocking, etc.)."
+globs: "**/*.spec.ts"
+alwaysApply: false
+---
+
+# Angular Unit Testing Best Practices Guide
+
+This rule enforces consistency and best practices for all `*.spec.ts` files in the project. Code under test follows [`angular-standards.mdc`](angular-standards.mdc) and [`angular-patterns.mdc`](angular-patterns.mdc).
+
+**Glob:** This file applies to `**/*.spec.ts` anywhere in the workspace. If you only want tests under specific roots (for example `apps/my-app/` or `projects/my-lib/`), edit the `globs` field in the front matter above.
+
+## 1. Follow the Arrange-Act-Assert (AAA) Pattern
+
+Organize your tests into three clear sections:
+
+* **Arrange**: Set up the test environment, mock dependencies, and define inputs.
+* **Act**: Execute the specific function or interaction being tested.
+* **Assert**: Verify the result or behavior against the expected outcome.
+
+## 2. Use `TestBed` for components and services
+
+Use Angular's `TestBed` for component and service tests. `TestBed.configureTestingModule({ ... })` builds a test module; supply mocks or real services in `providers`, and register the component under test and its template dependencies.
+
+**Standalone components** (see **Angular Standards**): import the component and any standalone dependencies (directives, pipes, other components, `RouterTestingModule`, etc.) via `imports`. Do not use `declarations` for standalone components.
+
+```typescript
+beforeEach(async () => {
+  await TestBed.configureTestingModule({
+    imports: [MyComponent, RouterTestingModule.withRoutes([])],
+    providers: [{ provide: DataService, useValue: mockDataService }],
+  }).compileComponents();
+});
+```
+
+**Legacy `NgModule` components** (until migrated): you may still use `declarations: [MyComponent]` together with `imports` for shared modules the template needs.
+
+## 3. Isolate unit tests
+
+Tests should focus on a single unit in isolation. Use mocks or stubs for external dependencies (for example services and child components) to prevent side effects and keep tests fast and reliable.
+
+## 4. Ensure tests are descriptive
+
+Use descriptive `describe` and `it` (or `test`) blocks so that the purpose and expected outcome of the test are immediately clear.
+
+* *Bad:* `it('should work', () => { ... });`
+* *Good:* `it('should update the user status when the update button is clicked', () => { ... });`
+
+## 5. Clean up resources
+
+While Angular handles much of the cleanup, ensure any manual subscriptions or non-Angular resources are properly disposed of, often in an `afterEach` block.
+
+## 6. Use async helpers with `async` or `await`
+
+When dealing with asynchronous operations common in Angular (HTTP, promises, timers), use Angular testing utilities (`vi.useFakeTimers`, `vi.advanceTimersByTime`, `vi.runAllTimersAsync`) so async flow is controlled and deterministic.
+
+## 7. Mock components, directives, and pipes in the template
+
+For component tests, mock child components, directives, and pipes that are not the unit under test so the template stays shallow and fast.
+
+Either use helpers from your app's **`testing/`** folder (for example a `mock-helper.ts` next to shared test utilities) when the project provides them, or use **`MockComponent`** / **`MockPipe`** from the **ng-mocks** library if you depend on it. When creating lightweight mock components, you do not need to mock basic DOM behavior.
+
+## 8. Mock services injected through DI
+
+Provide test doubles for injected services so you are unit testing the component or service under test, not running a full integration graph unless that is the intent of the test.
+
+## 9. Creating a unit test file for an Angular component
+
+Work in phases:
+
+* Create an initial test similar to the Angular CLI default (for example a basic "should create" test).
+* Run tests and fix errors; note baseline coverage.
+* Add tests for behavior and edge cases tied to acceptance criteria.
+* Re-run tests after changes; aim for strong coverage on new code (for example above **80%** on the files you touch, if that is your team's bar).

@@ -1,0 +1,91 @@
+---
+description: "Mandatory secure web application and API development guardrails (language-agnostic)"
+alwaysApply: true
+---
+
+# Web Application & API Security Requirements (MANDATORY)
+
+The AI coding agent MUST follow all requirements below for **any** generated or modified code, regardless of programming language, framework, or runtime.
+
+## 1. OWASP Top 10 Compliance
+- All generated code **must be designed and written to prevent OWASP Top 10 vulnerabilities** (latest published version).
+- If a requested change could introduce or worsen an OWASP Top 10 risk, the agent MUST:
+  - Refuse the unsafe implementation, AND
+  - Propose a secure alternative with explanation.
+
+This includes but is not limited to:
+- Broken access control
+- Injection flaws
+- Cryptographic failures
+- Insecure design
+- Security misconfiguration
+- Vulnerable or outdated components
+- Authentication and session management weaknesses
+- Data integrity and SSRF issues
+
+## 2. Mandatory Initialization & Safe Defaults
+- Every variable, field, property, parameter, and data structure MUST:
+  - Be explicitly initialized before use
+  - Have a safe and predictable default value
+- No uninitialized, nullable, or implicitly defined values unless strictly required and validated.
+
+## 3. Input Size & Length Protection
+- Any field, variable, or property that accepts user input or external data MUST:
+  - Enforce reasonable maximum length limits based on intended usage
+  - Validate input size **before processing**
+  - Reject or safely handle over‑limit input
+- Unbounded strings, arrays, buffers, lists, or collections are NOT allowed.
+
+## 4. Input Validation & Output Encoding
+- All external input (user, API, file, network, environment) MUST:
+  - Be validated for type, length, format, and allowed values
+- All output rendered to clients, logs, or downstream systems MUST:
+  - Be properly encoded or sanitized based on context (HTML, JSON, SQL, shell, etc.)
+
+## 5. Authentication & Authorization
+- Authentication logic MUST:
+  - Use proven, industry‑standard mechanisms
+  - Never store or transmit secrets in plaintext
+- Authorization MUST:
+  - Be enforced server‑side
+  - Default to deny access unless explicitly allowed
+- Role, permission, or ownership checks are REQUIRED for protected operations.
+
+## 6. Cryptography & Secrets
+- Cryptography MUST:
+  - Use modern, vetted algorithms and libraries
+  - Never implement custom cryptographic primitives
+- Secrets (keys, tokens, passwords):
+  - Must never be hardcoded
+  - Must be loaded securely from approved secret stores or environment mechanisms
+
+## 7. OSS Dependency & Supply Chain Security
+- Open‑source libraries and dependencies MUST:
+  - Be actively maintained
+  - Have no known critical vulnerabilities
+- **Restricted or high‑risk OSS packages are NOT allowed unless explicitly approved.**
+- Any new dependency MUST be justified and documented.
+
+## 8. Error Handling & Logging
+- Errors MUST:
+  - Fail securely
+  - Never leak sensitive information (stack traces, secrets, internal paths)
+- Logs MUST:
+  - Avoid personal data, secrets, or credentials
+  - Be structured and security‑aware
+
+## 9. Secure Design & Defense in Depth
+- Code MUST:
+  - Follow least privilege principles
+  - Assume external systems and inputs are untrusted
+  - Avoid single points of failure
+- Security controls SHOULD be layered rather than relying on a single safeguard.
+
+## 10. Security‑First Refactoring
+- When refactoring or extending code:
+  - Security posture MUST be preserved or improved
+  - No security control may be weakened or removed without explicit justification
+
+---
+
+If any requirement conflicts with a user request, **security requirements take precedence**.

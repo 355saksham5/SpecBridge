@@ -1,0 +1,56 @@
+---
+description: ASP.NET Core backend layout, configuration, and dependency injection patterns
+globs: "**/*.cs,**/*.csproj,**/Dockerfile,**/.env.example,**/appsettings*.json,**/Program.cs"
+alwaysApply: false
+---
+
+# .NET Backend Patterns
+
+## Project layout (adapt to repo)
+
+Typical layers in a solution (single project or multi-project):
+
+- **`Controllers/`** — HTTP action methods only; thin, no business logic.
+- **`Services/`** or **`Application/`** — Business logic and use-case handlers; testable without HTTP.
+- **`Domain/`** or **`Models/`** — Domain entities, value objects, domain events.
+- **`Infrastructure/`** or **`Data/`** — EF Core `DbContext`, repository implementations, EF migrations.
+- **`DTOs/`** or **`Contracts/`** — Request/response objects (records or classes) for API boundaries; never expose entities directly.
+- **`Configuration/`** — `IOptions<T>` settings classes; extension methods for `IServiceCollection` registration.
+
+## Configuration
+
+- Use **`appsettings.json`** + **`appsettings.{Environment}.json`** for non-secret config; **never** commit secrets.
+- Use **`IOptions<T>`** / **`IOptionsMonitor<T>`** for strongly-typed settings; call `ValidateDataAnnotations()` and `ValidateOnStart()` so missing required config fails fast at startup.
+- Load secrets from **environment variables**, **Azure Key Vault**, **AWS Secrets Manager**, or **User Secrets** (dev only); never from checked-in files.
+
+## Dependency injection
+
+- Register services in `Program.cs` via `IServiceCollection` extension methods (one file per feature area).
+- Respect **lifetime scoping**: `AddScoped` for per-request resources (DbContext, unit of work), `AddSingleton` for thread-safe shared services, `AddTransient` for lightweight stateless services.
+- Avoid **`ServiceLocator`** anti-pattern; inject all dependencies through constructors.
+
+## Async / await
+
+- Prefer **`async Task<T>`** on all I/O-bound operations (DB, HTTP, file system); propagate `CancellationToken` from action parameters to service and data-access calls.
+- Do **not** block the thread pool with `.Result` or `.Wait()`—always `await`.
+- For CPU-bound work that must be offloaded, use `Task.Run` with care or a background service (`IHostedService` / `BackgroundService`).
+
+## Background work
+
+- Use **`IHostedService`** / **`BackgroundService`** for in-process background tasks.
+- Use **Hangfire** for scheduled / recurring jobs with persistence.
+- For message-based work, integrate with Azure Service Bus, RabbitMQ, or equivalent via MassTransit or NServiceBus.
+
+## Migrations (EF Core)
+
+- Generate migrations with `dotnet ef migrations add <Name>`; **review** the generated `.cs` before merging.
+- Never edit already-applied migrations; add a new migration to fix mistakes.
+- Review large migrations for **table locking** and **downtime** risks; use multi-step migrations (add nullable column → backfill → add constraint) for zero-downtime changes.
+- Apply migrations at startup only in controlled environments (e.g. `context.Database.MigrateAsync()` in dev/test); prefer a deployment step in production.
+
+## Logging & observability
+
+- Use **`ILogger<T>`** via DI; never use `Console.WriteLine` in production code.
+- Emit **structured logs** with `{PropertyName}` placeholders, not string interpolation, so Serilog / Application Insights can index fields.
+- Integrate **OpenTelemetry** (`ActivitySource`, metrics, traces) for distributed tracing and metrics export.
+- Add **health checks** (`AddHealthChecks`) for databases and external dependencies.

@@ -1,0 +1,47 @@
+---
+description: Security practices for Angular frontends and ASP.NET Core APIs
+globs: "**/*.ts,**/*.cs,**/*.html,**/*.razor"
+alwaysApply: false
+---
+
+# Web Security (Angular + ASP.NET Core)
+
+## Authentication & authorization
+
+- **Angular:** Route **guards**; HTTP **interceptors** for Bearer tokens; do not store long-lived secrets in `localStorage` if the threat model forbids it—follow team standard.
+- **ASP.NET Core:** Validate **JWT Bearer** tokens via `AddAuthentication().AddJwtBearer()`; enforce **RBAC/ABAC** using `[Authorize(Policy = "…")]` and `IAuthorizationService` in services, not only on controller/action decorators.
+- Apply `[Authorize]` at the controller level and only add `[AllowAnonymous]` on explicitly public endpoints.
+
+## Input validation
+
+- **ASP.NET Core:** `[ApiController]` with Data Annotations or **FluentValidation** on all request DTOs; reject oversize payloads at the middleware level (`options.MaxRequestBodySize`).
+- **Angular:** Sanitize untrusted HTML via Angular's `DomSanitizer`; validate file uploads (type, size) on both client and server.
+- Never trust client-supplied lengths, types, or enums without server-side verification.
+
+## Sensitive data
+
+- Never log **passwords**, **tokens**, **API keys**, or unnecessary **PII**.
+- Redact or hash identifiers in logs when the spec requires it.
+- Use **`[JsonIgnore]`** / `[IgnoreDataMember]` to prevent accidental serialization of sensitive fields.
+
+## HTTPS & headers
+
+- Enforce **HTTPS** in production with `app.UseHttpsRedirection()` and `app.UseHsts()`.
+- Configure **CORS** allowlists via `app.UseCors(policy => policy.WithOrigins("…"))`; avoid `AllowAnyOrigin` with credentials.
+- Apply **CSP**, **X-Content-Type-Options**, **X-Frame-Options**, and **Referrer-Policy** headers via middleware (e.g. `NWebsec` or custom `IApplicationBuilder` extension).
+
+## CSRF & cookies
+
+- If using **cookie-based** auth, configure `SameSite=Strict/Lax`, `Secure`, `HttpOnly` on all auth cookies.
+- For MVC / Razor Pages, use ASP.NET Core's built-in **antiforgery** middleware (`AddAntiforgery`, `[ValidateAntiForgeryToken]`).
+- For SPA + API (JWT-only), CSRF is not required, but keep tokens out of URLs and non-HttpOnly cookies.
+
+## Secrets management
+
+- Load secrets from **Azure Key Vault**, **AWS Secrets Manager**, **environment variables**, or **User Secrets** (dev); never hardcode in `appsettings.json` or source.
+- Use **`IOptions<T>`** with `ValidateDataAnnotations()` + `ValidateOnStart()` to catch misconfiguration at startup.
+
+## Dependency & supply chain
+
+- Keep NuGet packages updated; use **`dotnet list package --vulnerable`** or GitHub Dependabot to detect known CVEs.
+- Pin package versions in `*.csproj`; review transitive dependencies for critical upgrades.

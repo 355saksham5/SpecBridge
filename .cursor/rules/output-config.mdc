@@ -1,0 +1,68 @@
+---
+description: "Output directory configuration — all SDD artifacts go under .sdd/ in the workspace, organised by features / tasks with pending vs completed sub-folders"
+globs: "output/**,.sdd/**,**/feature_spec.md,**/plan.md,**/stories.md,**/backlog.md,**/requirements.md,**/svs.md,**/*.task.md,**/initiative_confluence.md,**/backlog.yaml"
+alwaysApply: false
+---
+
+# SDD Output Directory Configuration
+
+All SDD artefacts MUST be written to a structured directory inside the workspace.
+
+## Layout
+
+```
+.sdd/
+├── docs/
+│   ├── project_knowledge.md             ← living truth doc (code/architecture)
+│   └── project_deployment_knowledge.md  ← living truth doc (infra/deploy)
+├── features/
+│   ├── pending/
+│   │   └── {feature-identifier}/
+│   │       ├── feature_spec.md                   ← Step 1
+│   │       ├── requirements.md           ← Step 2 (pruned as REQs complete)
+│   │       ├── svs.md                    ← Step 2
+│   │       ├── stories.md                ← Step 2 (pruned as stories complete)
+│   │       ├── plan.md                   ← Step 3
+│   │       ├── initiative_confluence.md  ← Step 4 (optional)
+│   │       ├── jira/                     ← Step 4 (optional)
+│   │       │   └── backlog.yaml
+│   │       └── .tasks/                   ← per-dev task docs (gitignored)
+│   │           └── STORY-001.task.md
+│   └── completed/
+│       └── {feature-identifier}.md             ← consolidated per shipped feature
+└── tasks/
+    ├── pending/
+    │   └── {task-identifier}.md                ← bug / small task brief
+    └── completed.md                      ← all shipped tasks, newest on top
+```
+
+## Rules
+
+1. **`.sdd/` at workspace root.** Multi-root → first workspace root.
+2. **Feature identifier** = kebab-case of feature name. **Task identifier** = kebab-case of description; `--identifier` overrides.
+3. **Pending vs completed.** Pending = working set agents read freely. Completed = immutable history, AI should NOT read from `.sdd/features/completed/**` or `.sdd/tasks/completed.md` during planning or implementation.
+4. **`.tasks/` is per-dev, gitignored, not committed.**
+5. **Confluence + Jira artefacts** live alongside the feature's other docs under `features/pending/{identifier}/`. When the feature ships, references to these are recorded in the completed doc (or their content summary is inlined).
+6. **One file per shipped feature; one file total for shipped tasks** (`tasks/completed.md`, newest on top).
+7. **Existing folder.** If `.sdd/features/pending/{identifier}/` already exists, ask before overwriting; offer `{identifier}-v2` variant.
+8. **Announce path** on first write: *"Writing artefacts to `.sdd/features/pending/{identifier}/`."*
+9. **Legacy `output/{project}/`** still recognised for back-compat. New projects use `.sdd/`.
+
+## Ignore configuration
+
+Install script appends these; `/start-story` offers to add if missing.
+
+`.gitignore`:
+```
+.sdd/features/pending/*/.tasks/
+```
+
+`.cursorignore` (and `.cursorindexingignore` if supported):
+```
+.sdd/features/completed/
+.sdd/tasks/completed.md
+```
+
+## User override
+
+If the user names a custom path (e.g. "write to `specs/my-feature/`"), honour it. Must remain inside workspace root.

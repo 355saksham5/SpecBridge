@@ -1,0 +1,41 @@
+---
+description: Specs-Driven Design (SDD) workflow for coding agent — specs before code, traceability end-to-end
+globs: "output/**,.sdd/**,**/feature_spec.md,**/plan.md,**/stories.md,**/backlog.md,**/requirements.md,**/svs.md,**/*.task.md"
+alwaysApply: false
+---
+
+# Specs-Driven Design (SDD)
+
+This project uses **SDD**: product intent and contracts are captured in **specs** and **backlog artifacts** before implementation. The coding agent implements against **approved scope**, not ad-hoc assumptions.
+
+## Artifact chain (stepped, gated)
+
+Each step below requires **explicit user approval** before the agent proceeds to the next. See `.cursor/rules/sdd-workflow-orchestration.mdc` for enforcement details.
+
+1. **Feature spec** — Problem, goals/non-goals, constraints, conceptual APIs (see `.cursor/examples/example_feature_spec.md`). **→ STOP for review.**
+2. **Requirement IDs + SVS + Stories** — Stable `REQ-…` IDs, sprint-sized slices, Gherkin AC, NFRs (`.cursor/templates/story_template.md`, `agents/backlog_architect.md`). **→ STOP for review.**
+3. **Plan / tasks** — Implementation steps derived from spec; link **REQ-…** IDs. **→ STOP for review.**
+4. **Publishing** — Confluence initiative doc, Jira hierarchy (optional, user-initiated).
+5. **Code + tests** — Map changes to the same IDs in commit messages or PR descriptions when the team requires it.
+
+All artifacts are written to the output directory defined in `.cursor/rules/output-config.mdc`.
+
+## Rules for the coding agent
+
+- **Do not expand scope** beyond the spec’s goals and the story’s AC without explicit user/product confirmation.
+- **Prefer additive, backward-compatible** API and schema changes; version or flag breaking changes.
+- **OpenAPI / DTOs** (Swashbuckle/NSwag) stay in sync with implemented behavior; update spec snippets when contracts change.
+- If the spec is **missing or ambiguous**, list **assumptions** and **questions** before large implementations—do not invent product requirements.
+
+## Traceability
+
+- Reference **REQ-…** (or project IDs) when editing files tied to a feature.
+- After implementation, **Documentation & Review Assistant** (`agents/doc_review_assistant.md`) maps PRs to AC; keep tests and diffs as evidence.
+
+## Where to look
+
+- `.cursor/rules/sdd-workflow-orchestration.mdc` — **Stepped workflow with review gates** (always applied).
+- `.cursor/rules/output-config.mdc` — **Output directory configuration** (always applied).
+- `.cursor/agents/backlog_architect.md` — SVS, stories, Gherkin, task breakdown.
+- `.cursor/agents/technical_analyst.md` — Feasibility and risk before build.
+- `.cursor/examples/example_feature_spec.md` — Example feature spec shape.
