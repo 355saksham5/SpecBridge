@@ -1,3 +1,4 @@
+import { sanitizeForAudit } from "@specbridge/audit-log";
 import type { EmitFn } from "./bootstrap-pipeline.js";
 
 export type TraceContext = {
@@ -7,8 +8,8 @@ export type TraceContext = {
 
 /**
  * Wraps the worker emit fn so every SSE-like event carries `jobId` (and
- * optional `organizationId`) for App Insights correlation. Agent events also
- * propagate `runId` as `cursorRunId` when present.
+ * optional `organizationId`) for App Insights correlation. Payloads are
+ * sanitized per audit log policy before fan-out.
  */
 export function createTracingEmit(base: EmitFn | undefined, ctx: TraceContext): EmitFn {
   return (event) => {
@@ -18,7 +19,7 @@ export function createTracingEmit(base: EmitFn | undefined, ctx: TraceContext): 
     }
 
     const payload: Record<string, unknown> = {
-      ...event.payload,
+      ...(sanitizeForAudit(event.payload) as Record<string, unknown>),
       jobId: ctx.jobId,
     };
     if (ctx.organizationId) payload.organizationId = ctx.organizationId;

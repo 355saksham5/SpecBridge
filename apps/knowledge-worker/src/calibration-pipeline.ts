@@ -32,6 +32,7 @@ export type CalibrationLoopOptions = {
   actualChangedPaths: string[];
   cursorApiKey?: string;
   mock: boolean;
+  recordedAgents?: boolean;
   onEvent?: EmitFn;
   devilsAdvocateQuestionCount?: number;
   minAnswerScore?: number;
@@ -54,6 +55,8 @@ export async function runCalibrationLoop(options: CalibrationLoopOptions): Promi
   const minAnswerScore = clamp(options.minAnswerScore ?? 0.75, 0, 1);
   const maxRounds = clamp(options.maxRoundsPerCommit ?? 1, 1, 3);
 
+  const recordedMock = options.recordedAgents ?? options.mock;
+
   const manifest = await readManifest(options.workspaceDir).catch(() => null);
   const knownShardPaths = manifest?.shards.map((s) => s.relativePath) ?? [];
 
@@ -71,6 +74,7 @@ export async function runCalibrationLoop(options: CalibrationLoopOptions): Promi
     cwd: options.workspaceDir,
     systemPrompt: calibratorPrompt,
     mock: options.mock,
+    recordedMock,
     onEvent: options.onEvent,
   });
   await calibratorSession.run(
@@ -99,6 +103,7 @@ export async function runCalibrationLoop(options: CalibrationLoopOptions): Promi
     cwd: options.workspaceDir,
     systemPrompt: proberPrompt,
     mock: options.mock,
+    recordedMock,
     onEvent: options.onEvent,
   });
   await proberSession.run(
@@ -133,6 +138,7 @@ export async function runCalibrationLoop(options: CalibrationLoopOptions): Promi
       cwd: options.workspaceDir,
       systemPrompt: curatorPrompt,
       mock: options.mock,
+      recordedMock,
       onEvent: options.onEvent,
     });
     await curatorSession.run(
@@ -164,6 +170,7 @@ export async function runCalibrationLoop(options: CalibrationLoopOptions): Promi
       cwd: options.workspaceDir,
       systemPrompt: auditorPrompt,
       mock: options.mock,
+      recordedMock,
       onEvent: options.onEvent,
     });
     await auditorSession.run(

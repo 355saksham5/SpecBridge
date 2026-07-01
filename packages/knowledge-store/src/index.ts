@@ -58,6 +58,49 @@ export function sha256(content: string | Buffer): string {
   return createHash("sha256").update(content).digest("hex");
 }
 
+/** Default per-shard token cap (matches OpenAPI default). */
+export const DEFAULT_MAX_SHARD_TOKENS = 800;
+
+/** Hard cap on shard count for monorepos — excess shards are dropped oldest-first. */
+export const DEFAULT_MAX_SHARD_COUNT = 10_000;
+
+export type EnforceShardCapResult = {
+  shards: KnowledgeShard[];
+  droppedCount: number;
+  truncatedTokenDelta: number;
+};
+
+/**
+ * Applies monorepo shard caps: limits shard count and truncates individual
+ * shards that exceed maxShardTokens.
+ */
+export function enforceShardCap(
+  shards: KnowledgeShard[],
+  options: { maxShards?: number; maxShardTokens?: number } = {},
+): EnforceShardCapResult {
+  const maxShards = options.maxShards ?? DEFAULT_MAX_SHARD_COUNT;
+  const maxShardTokens = options.maxShardTokens ?? DEFAULT_MAX_SHARD_TOKENS;
+
+  const kept = shards.slice(0, maxShards);
+  const droppedCount = Math.max(0, shards.length - kept.length);
+  let truncatedTokenDelta = 0;
+
+  const capped = kept.map((shard) => {
+    if (shard.frontMatter.tokenEstimate <= maxShardTokens) return shard;
+    const maxChars = maxShardTokens * 4;
+    const trimmed = shard.content.slice(0, maxChars);
+    const newEstimate = estimateTokens(trimmed);
+    truncatedTokenDelta += shard.frontMatter.tokenEstimate - newEstimate;
+    return {
+      ...shard,
+      content: `${trimmed}\n\n_[truncated at ${maxShardTokens} token cap]_`,
+      frontMatter: { ...shard.frontMatter, tokenEstimate: newEstimate },
+    };
+  });
+
+  return { shards: capped, droppedCount, truncatedTokenDelta };
+}
+
 /** Rough token estimate: ~4 chars per token (OpenAI-style heuristic). */
 export function estimateTokens(text: string): number {
   if (!text) return 0;

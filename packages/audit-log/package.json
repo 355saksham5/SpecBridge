@@ -1,0 +1,20 @@
+{
+  "name": "@specbridge/audit-log",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Security-aware event payload sanitizer — never log prompt bodies, repo content, or Jira text",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "files": ["dist"]
+}

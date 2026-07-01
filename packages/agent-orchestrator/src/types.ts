@@ -46,6 +46,8 @@ export type AgentSessionOptions = {
   onEvent?: (event: OrchestratorEvent) => void;
   /** When true, skip real Cursor SDK calls (for CI/local without API key). */
   mock?: boolean;
+  /** When mock is true, use deterministic recorded fixtures instead of generic placeholder text. */
+  recordedMock?: boolean;
 };
 
 export type AgentPromptResult = {

@@ -46,6 +46,7 @@ export type CommitWalkOptions = {
   jira?: JiraEnrichmentOptions;
   cursorApiKey?: string;
   mockAgents?: boolean;
+  recordedAgents?: boolean;
   validation?: ValidationOptions;
   onEvent?: EmitFn;
 };
@@ -148,6 +149,7 @@ export async function runCommitWalkPhase(options: CommitWalkOptions): Promise<Co
     const record = await processJiraLinkedCommit(commit, {
       ...options,
       mock,
+      recordedAgents: options.recordedAgents ?? mock,
       jiraClient,
       featureHistorianPrompt,
     });
@@ -183,7 +185,7 @@ function average(values: number[]): number {
 
 async function processJiraLinkedCommit(
   commit: CommitWithJira,
-  ctx: CommitWalkOptions & { mock: boolean; jiraClient: JiraClient | null; featureHistorianPrompt: string },
+  ctx: CommitWalkOptions & { mock: boolean; recordedAgents: boolean; jiraClient: JiraClient | null; featureHistorianPrompt: string },
 ): Promise<ProcessedCommitRecord> {
   const jiraKey = commit.jiraKey!;
   const diff = await diffCommit(ctx.repoPath, commit.sha, commit.parentSha);
@@ -210,6 +212,7 @@ async function processJiraLinkedCommit(
     cwd: ctx.repoPath,
     systemPrompt: ctx.featureHistorianPrompt,
     mock: ctx.mock,
+    recordedMock: ctx.recordedAgents,
     onEvent: ctx.onEvent,
   });
 
@@ -230,6 +233,7 @@ async function processJiraLinkedCommit(
     actualChangedPaths: changedPaths,
     cursorApiKey: ctx.cursorApiKey,
     mock: ctx.mock,
+    recordedAgents: ctx.recordedAgents,
     onEvent: ctx.onEvent,
     devilsAdvocateQuestionCount: ctx.validation?.devilsAdvocateQuestionCount,
     minAnswerScore: ctx.validation?.minAnswerScore,

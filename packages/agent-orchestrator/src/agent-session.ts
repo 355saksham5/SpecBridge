@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { AgentPromptResult, AgentSessionOptions, OrchestratorEvent } from "./types.js";
 import type { Run, SDKAgent } from "@cursor/sdk";
+import { lookupRecordedResponse } from "./recorded-mock.js";
 
 export class AgentSession implements AsyncDisposable {
   private disposed = false;
@@ -46,15 +47,16 @@ export class AgentSession implements AsyncDisposable {
     });
 
     if (this.options.mock || !this.agent) {
-      await sleep(100);
-      const result = `[mock] ${this.options.role} completed task`;
+      await sleep(this.options.recordedMock ? 10 : 100);
+      const recorded = this.options.recordedMock ? lookupRecordedResponse(this.options.role, taskPrompt) : null;
+      const result = recorded?.result ?? `[mock] ${this.options.role} completed task`;
       const metrics: AgentPromptResult = {
         status: "finished",
         result,
         runId,
         cursorAgentId: this.cursorAgentId,
-        tokensIn: 1000,
-        tokensOut: 500,
+        tokensIn: recorded?.tokensIn ?? 1000,
+        tokensOut: recorded?.tokensOut ?? 500,
         durationMs: Date.now() - startedAt,
       };
 

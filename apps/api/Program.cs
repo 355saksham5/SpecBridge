@@ -8,6 +8,7 @@ using Azure.Security.KeyVault.Secrets;
 using SpecBridge.Api.Data;
 using SpecBridge.Api.Middleware;
 using SpecBridge.Api.Services;
+using SpecBridge.Api.Validation;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -35,8 +36,11 @@ if (!string.IsNullOrEmpty(keyVaultUri))
     builder.Services.AddSingleton(sp => new SecretClient(new Uri(keyVaultUri), credential));
 }
 
+builder.Services.AddSingleton<GhesHostRegistry>();
 builder.Services.AddSingleton<JobCancellationRegistry>();
 builder.Services.AddSingleton<BrownfieldJobQueue>();
+builder.Services.AddSingleton<RepoPreflightService>();
+builder.Services.AddHttpClient();
 
 builder.Services.AddFluentValidationAutoValidation();
 builder.Services.AddValidatorsFromAssemblyContaining<Program>();
@@ -83,7 +87,7 @@ app.MapGet("/health", () => Results.Ok(new
 {
     status = "healthy",
     timestamp = DateTime.UtcNow,
-    version = "1.0.0-phase5"
+    version = "1.0.0-phase6"
 }))
 .AllowAnonymous()
 .WithName("GetHealth")
@@ -99,19 +103,81 @@ app.MapGet("/", () => Results.Ok(new
 .AllowAnonymous()
 .WithName("GetRoot");
 
+app.MapGet("/v1/preflight/repo", async (
+    string repoUrl,
+    GhesHostRegistry registry,
+    RepoPreflightService preflight) =>
+{
+    if (!RepoUrlValidation.TryParse(repoUrl, out var uri, out var parseError))
+    {
+        return Results.BadRequest(new { title = "Invalid repoUrl", detail = parseError });
+    }
+
+    var host = uri!.Host;
+    if (!registry.IsAllowedHost(host))
+    {
+        return Results.BadRequest(new
+        {
+            title = "Host not allowlisted",
+            detail = $"Host '{host}' is not github.com or a registered GHES host.",
+            registeredGhesHosts = registry.RegisteredGhesHosts,
+        });
+    }
+
+    var (reachable, detail) = host.Equals("github.com", StringComparison.OrdinalIgnoreCase)
+        ? (true, "github.com — skipped reachability probe")
+        : await preflight.CheckHostReachableAsync(host);
+
+    return Results.Ok(new
+    {
+        repoUrl,
+        host,
+        allowlisted = true,
+        reachable,
+        detail,
+        cursorEgressNote = "Cursor Cloud Agents must reach this host — customer may need to allowlist Cursor egress IPs for GHES.",
+    });
+})
+.RequireAuthorization()
+.WithName("PreflightRepo")
+.WithTags("Preflight");
+
 app.MapGet("/v1/brownfield-jobs", () => Results.Ok(new { jobs = Array.Empty<object>() }))
     .RequireAuthorization()
     .WithName("ListBrownfieldJobs")
     .WithTags("Brownfield Jobs");
 
-app.MapPost("/v1/brownfield-jobs", async (BrownfieldJobQueue queue, HttpContext http) =>
+app.MapPost("/v1/brownfield-jobs", async (
+    BrownfieldJobQueue queue,
+    GhesHostRegistry registry,
+    HttpContext http) =>
 {
+    if (!http.Request.Headers.TryGetValue("X-Repo-Url", out var repoUrlHeader))
+    {
+        return Results.BadRequest(new { title = "Missing repo URL", detail = "Provide X-Repo-Url header until full request body validation lands in Phase 6+" });
+    }
+
+    var repoUrl = repoUrlHeader.ToString();
+    if (!RepoUrlValidation.TryParse(repoUrl, out var uri, out var parseError))
+    {
+        return Results.BadRequest(new { title = "Invalid repoUrl", detail = parseError });
+    }
+
+    if (!registry.IsAllowedHost(uri!.Host))
+    {
+        return Results.BadRequest(new
+        {
+            title = "Host not allowlisted",
+            detail = $"Host '{uri.Host}' is not permitted.",
+        });
+    }
+
     var jobId = Guid.NewGuid();
     var payload = new
     {
         jobId,
         organizationId = http.User.FindFirst("org_id")?.Value,
-        options = new { enqueuedAt = DateTime.UtcNow },
+        options = new { repoUrl, enqueuedAt = DateTime.UtcNow },
     };
 
     if (queue.IsConfigured)
@@ -123,6 +189,7 @@ app.MapPost("/v1/brownfield-jobs", async (BrownfieldJobQueue queue, HttpContext 
     {
         jobId,
         status = "queued",
+        repoUrl,
         createdAt = DateTime.UtcNow,
     });
 })

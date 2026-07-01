@@ -8,6 +8,7 @@ import {
   estimateTokens,
   readManifest,
   writeKnowledgeStore,
+  enforceShardCap,
   type GranularityPrompt,
   type KnowledgeShard,
 } from "@specbridge/knowledge-store";
@@ -62,6 +63,8 @@ export type BootstrapJobOptions = {
   commitDepth?: number;
   cursorApiKey?: string;
   mockAgents?: boolean;
+  /** When mockAgents is true, use deterministic recorded fixtures (CI zero-cost). Default true. */
+  recordedAgents?: boolean;
   sddKit?: SddKitRef;
   confluence?: ConfluenceEnrichmentOptions;
   onEvent?: EmitFn;
@@ -158,6 +161,7 @@ export async function bootstrapKnowledgeAtHead(options: BootstrapJobOptions): Pr
     cwd: options.repoPath,
     systemPrompt,
     mock,
+    recordedMock: options.recordedAgents ?? mock,
     onEvent: options.onEvent,
     granularityPrompt: options.granularityPrompt,
     taskDescription,
@@ -267,12 +271,16 @@ async function synthesizeBootstrapArtifacts(workspaceDir: string, options: Boots
     shard.frontMatter.tokenEstimate = estimateTokens(shard.content);
   }
 
-  const knowledgeManifest = buildManifest(sampleShards, {
+  const { shards: cappedShards } = enforceShardCap(sampleShards, {
+    maxShardTokens: options.maxShardTokens,
+  });
+
+  const knowledgeManifest = buildManifest(cappedShards, {
     headSha: options.headSha,
     granularity: options.granularityPrompt,
     maxShardTokens: options.maxShardTokens,
     advisorPrompt: options.advisorPrompt,
   });
 
-  await writeKnowledgeStore(workspaceDir, knowledgeManifest, sampleShards);
+  await writeKnowledgeStore(workspaceDir, knowledgeManifest, cappedShards);
 }

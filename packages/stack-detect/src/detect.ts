@@ -2,6 +2,24 @@ import { readdir } from "node:fs/promises";
 import { join, relative, extname, basename } from "node:path";
 import type { DetectStackOptions, LanguageStat, StackProfile } from "./types.js";
 
+/** Default cap for repos with >50k indexable files — walk stops early with truncation flag. */
+export const MAX_REPO_FILES = 50_000;
+
+/** Extra excludes applied when monorepo markers are detected or for large repos. */
+export const MONOREPO_MODULE_EXCLUDES = [
+  "**/packages/*/node_modules/**",
+  "**/apps/*/node_modules/**",
+  "**/tools/*/node_modules/**",
+  "**/.pnpm/**",
+  "**/target/**",
+  "**/.gradle/**",
+  "**/.idea/**",
+  "**/coverage/**",
+  "**/__pycache__/**",
+  "**/.venv/**",
+  "**/venv/**",
+];
+
 export const DEFAULT_EXCLUDES = [
   "**/node_modules/**",
   "**/bin/**",
@@ -205,8 +223,12 @@ function detectFromMarkers(files: string[]): Pick<
 }
 
 export async function detectStack(repoPath: string, options: DetectStackOptions = {}): Promise<StackProfile> {
-  const excludes = [...DEFAULT_EXCLUDES, ...(options.excludePathPatterns ?? [])];
-  const maxFiles = options.maxFiles ?? 10_000;
+  const maxFiles = Math.min(options.maxFiles ?? 10_000, MAX_REPO_FILES);
+  const excludes = [
+    ...DEFAULT_EXCLUDES,
+    ...(options.monorepoExcludes !== false ? MONOREPO_MODULE_EXCLUDES : []),
+    ...(options.excludePathPatterns ?? []),
+  ];
   const files: string[] = [];
 
   await walkFiles(repoPath, repoPath, excludes, maxFiles, files);
@@ -220,6 +242,10 @@ export async function detectStack(repoPath: string, options: DetectStackOptions 
     markers.buildTools = [...new Set([...markers.buildTools, "dotnet"])].sort();
   }
 
+  if (markers.monorepo && options.monorepoExcludes !== false) {
+    // monorepo hint already set from markers; excludes already applied above
+  }
+
   return {
     detectedAt: new Date().toISOString(),
     repoPath,
@@ -227,6 +253,8 @@ export async function detectStack(repoPath: string, options: DetectStackOptions 
     languages,
     ...markers,
     primaryLanguage: languages[0]?.language ?? null,
+    scanTruncated: files.length >= maxFiles,
+    filesScanned: files.length,
   };
 }
 

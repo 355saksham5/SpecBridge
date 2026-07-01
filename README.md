@@ -34,6 +34,8 @@ specbridge/
 │   └── knowledge-worker/       # TypeScript agent orchestrator
 ├── packages/
 │   ├── agent-orchestrator/
+│   ├── audit-log/
+│   ├── code-parser/
 │   ├── commit-walker/
 │   ├── knowledge-store/
 │   ├── calibration-metrics/
@@ -49,7 +51,7 @@ specbridge/
 
 This project follows **Specs-Driven Design** using the `csharp-sdd-starter-kit`. See [USAGE_GUIDE.md](./USAGE_GUIDE.md) for the complete workflow.
 
-**Current Phase**: Phase 5 complete — Azure production skeleton (Service Bus, Bicep, PR delivery, Confluence ingest, cancel, rate limiting). Next: Phase 6 hardening.
+**Current Phase**: Phase 6 complete — hardening (code-parser, recorded CI mocks, GHES allowlist, audit log sanitizer, monorepo shard caps). All implementation phases done.
 
 ## License
 

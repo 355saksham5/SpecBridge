@@ -12,6 +12,9 @@ export type StackProfile = {
   containerized: boolean;
   monorepo: boolean;
   primaryLanguage: string | null;
+  /** True when file walk hit maxFiles before completing the repo scan. */
+  scanTruncated?: boolean;
+  filesScanned?: number;
 };
 
 export type LanguageStat = {
@@ -24,6 +27,8 @@ export type DetectStackOptions = {
   excludePathPatterns?: string[];
   headSha?: string;
   maxFiles?: number;
+  /** When true, apply MONOREPO_MODULE_EXCLUDES in addition to defaults. */
+  monorepoExcludes?: boolean;
 };
 
 export type GranularityPrompt =
