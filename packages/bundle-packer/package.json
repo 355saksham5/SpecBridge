@@ -1,0 +1,27 @@
+{
+  "name": "@specbridge/bundle-packer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ZIP bundle assembly and specbridge.manifest.json writer",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@specbridge/knowledge-store": "*",
+    "archiver": "^7.0.1"
+  },
+  "devDependencies": {
+    "@types/archiver": "^6.0.3"
+  },
+  "files": ["dist"]
+}

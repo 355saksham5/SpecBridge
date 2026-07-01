@@ -1,0 +1,28 @@
+{
+  "name": "@specbridge/knowledge-worker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SpecBridge knowledge bootstrap worker — stack detect, Knowledge Architect, bundle pack",
+  "type": "module",
+  "bin": {
+    "specbridge-worker": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/index.js",
+    "dev": "node --import tsx src/index.ts"
+  },
+  "dependencies": {
+    "@specbridge/agent-orchestrator": "*",
+    "@specbridge/bundle-packer": "*",
+    "@specbridge/commit-walker": "*",
+    "@specbridge/jira-client": "*",
+    "@specbridge/knowledge-store": "*",
+    "@specbridge/stack-detect": "*"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.4"
+  },
+  "files": ["dist"]
+}

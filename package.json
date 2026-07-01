@@ -1,0 +1,27 @@
+{
+  "name": "specbridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SpecBridge brownfield SDD onboarding platform",
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*",
+    "tools/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "bootstrap:local": "npm run start --workspace=@specbridge/knowledge-worker -- --local"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "typescript": "^5.8.3",
+    "vitest": "^3.1.4"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

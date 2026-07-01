@@ -1,0 +1,26 @@
+{
+  "name": "@specbridge/agent-orchestrator",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cursor SDK agent lifecycle, prompt loading, and handoff validation",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@cursor/sdk": "^1.0.18",
+    "@specbridge/knowledge-store": "*",
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1"
+  },
+  "files": ["dist"]
+}

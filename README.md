@@ -49,7 +49,7 @@ specbridge/
 
 This project follows **Specs-Driven Design** using the `csharp-sdd-starter-kit`. See [USAGE_GUIDE.md](./USAGE_GUIDE.md) for the complete workflow.
 
-**Current Phase**: Greenfield setup — creating `feature_spec.md`
+**Current Phase**: Phase 3 — Commit Walk + Feature Historian (TypeScript packages + worker)
 
 ## License
 
