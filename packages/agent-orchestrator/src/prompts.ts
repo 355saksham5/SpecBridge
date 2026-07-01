@@ -89,6 +89,113 @@ export type FeatureHistorianTaskInput = {
   outputPath: string;
 };
 
+export type CommitCalibratorTaskInput = {
+  commitSha: string;
+  retroSpecText: string;
+  predictedPaths: string[];
+  actualPaths: string[];
+  overlapPercent: number;
+  missedPaths: string[];
+  hallucinatedPaths: string[];
+};
+
+export function buildCommitCalibratorTaskPrompt(input: CommitCalibratorTaskInput): string {
+  return [
+    `Review the calibration for commit ${input.commitSha}.`,
+    "",
+    "The predicted change set was extracted deterministically from the retro feature_spec.md;",
+    "the actual change set comes from `git diff parent..C_i`. Overlap math is already computed —",
+    "your job is to add qualitative commentary, not to recompute the numbers.",
+    "",
+    `Overlap: ${(input.overlapPercent * 100).toFixed(1)}%`,
+    `Predicted paths: ${input.predictedPaths.join(", ") || "(none)"}`,
+    `Actual paths: ${input.actualPaths.join(", ") || "(none)"}`,
+    `Missed (actual but not predicted): ${input.missedPaths.join(", ") || "(none)"}`,
+    `Hallucinated (predicted but not actual): ${input.hallucinatedPaths.join(", ") || "(none)"}`,
+    "",
+    "Retro spec excerpt:",
+    input.retroSpecText.slice(0, 4000),
+    "",
+    "Do NOT generate questions — that is the Question Prober's job.",
+  ].join("\n");
+}
+
+export type QuestionProberTaskInput = {
+  commitSha: string;
+  overlapPercent: number;
+  missedPaths: string[];
+  hallucinatedPaths: string[];
+  questionCount: number;
+};
+
+export function buildQuestionProberTaskPrompt(input: QuestionProberTaskInput): string {
+  return [
+    `Generate exactly ${input.questionCount} probing questions about the knowledge gaps for commit ${input.commitSha}.`,
+    "",
+    `Calibration overlap: ${(input.overlapPercent * 100).toFixed(1)}%`,
+    `Paths the prediction missed: ${input.missedPaths.join(", ") || "(none)"}`,
+    `Paths incorrectly predicted (hallucinated): ${input.hallucinatedPaths.join(", ") || "(none)"}`,
+    "",
+    "Questions only — no answers. Ground each question in a specific missed or hallucinated path",
+    "where possible; fill remaining questions with adversarial probes about the current knowledge",
+    "store's coverage, using the probing style in your system prompt.",
+  ].join("\n");
+}
+
+export type KnowledgeCuratorTaskInput = {
+  commitSha: string;
+  questions: Array<{ id: string; text: string }>;
+  knownShardPaths: string[];
+  priorAuditFeedback?: string;
+};
+
+export function buildKnowledgeCuratorTaskPrompt(input: KnowledgeCuratorTaskInput): string {
+  return [
+    `Answer the following questions for commit ${input.commitSha} using the knowledge store ONLY.`,
+    "`no_repo_reexplore` is a hard constraint — do not read the target repo's source files.",
+    "",
+    "Questions:",
+    ...input.questions.map((q) => `- [${q.id}] ${q.text}`),
+    "",
+    "Known shard paths available for citation:",
+    input.knownShardPaths.join(", ") || "(knowledge store is empty)",
+    "",
+    input.priorAuditFeedback
+      ? `Previous audit round rejected some patches. Feedback:\n${input.priorAuditFeedback}\n`
+      : "",
+    "For each question, cite the shard path(s) your answer is grounded in. Propose shard patches",
+    "(replace/append/delete/update_weight) only where they measurably improve retrieval fidelity —",
+    "do not patch speculatively.",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+export type KnowledgeAuditorTaskInput = {
+  commitSha: string;
+  answerCount: number;
+  patchCount: number;
+  knownShardPaths: string[];
+  minAnswerScore: number;
+};
+
+export function buildKnowledgeAuditorTaskPrompt(input: KnowledgeAuditorTaskInput): string {
+  return [
+    `Audit the Knowledge Curator's proposal for commit ${input.commitSha}.`,
+    "",
+    `Answers to validate: ${input.answerCount}`,
+    `Patches to validate: ${input.patchCount}`,
+    `Minimum passing answer score: ${input.minAnswerScore}`,
+    "",
+    "Known shard paths (any citation outside this list is invalid):",
+    input.knownShardPaths.join(", ") || "(knowledge store is empty)",
+    "",
+    "Check citation validity, estimate each patch's token budget impact, and score coverage,",
+    "precision, citation validity, and token efficiency independently. Approve or reject each",
+    "patch individually — do not block the whole batch on one bad patch.",
+  ].join("\n");
+}
+
 export function buildFeatureHistorianTaskPrompt(input: FeatureHistorianTaskInput): string {
   return [
     `Write a retrospective feature_spec.md for Jira issue ${input.jiraKey} at commit ${input.commitSha}.`,

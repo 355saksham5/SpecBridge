@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { packBundle, computeTokenReduction } from "@specbridge/bundle-packer";
 import { getHeadSha, type WalkOrder, type JiraExtractSource } from "@specbridge/commit-walker";
 import { bootstrapKnowledgeAtHead, emit, type BootstrapJobOptions } from "./bootstrap-pipeline.js";
-import { runCommitWalkPhase, type JiraEnrichmentOptions } from "./commit-walk-pipeline.js";
+import { runCommitWalkPhase, type JiraEnrichmentOptions, type ValidationOptions } from "./commit-walk-pipeline.js";
 
 const FULL_SHA_PATTERN = /^[0-9a-f]{40}$/;
 
@@ -11,6 +11,7 @@ export type BrownfieldJobOptions = BootstrapJobOptions & {
   issueKeyPattern?: string;
   extractFrom?: JiraExtractSource[];
   jira?: JiraEnrichmentOptions;
+  validation?: ValidationOptions;
 };
 
 export type BrownfieldJobResult = {
@@ -22,15 +23,13 @@ export type BrownfieldJobResult = {
   shardCount: number;
   commitsProcessed: number;
   commitsSkipped: number;
+  meanQaScore: number | null;
+  calibrationOverlapMean: number | null;
 };
 
 /**
  * Full job sequence per the SpecBridge core algorithm:
- * knowledge_bootstrap → commit_walk → bundle_packaging.
- *
- * Phase 4 (calibration loop) has not run yet, so `tokenEstimateEnd` equals
- * `tokenEstimateStart` and `meanQaScore` is null until Knowledge Curator /
- * Auditor are wired in.
+ * knowledge_bootstrap -> commit_walk (incl. calibration loop) -> bundle_packaging.
  */
 export async function runBrownfieldJob(options: BrownfieldJobOptions): Promise<BrownfieldJobResult> {
   const resolvedHeadSha = FULL_SHA_PATTERN.test(options.headSha)
@@ -52,8 +51,12 @@ export async function runBrownfieldJob(options: BrownfieldJobOptions): Promise<B
     jira: options.jira,
     cursorApiKey: options.cursorApiKey,
     mockAgents: bootstrap.mock,
+    validation: options.validation,
     onEvent: options.onEvent,
   });
+
+  // Approved curator patches change the shard token budget after bootstrap.
+  const tokenEstimateEnd = Math.max(0, bootstrap.tokenEstimateStart + commitWalk.tokenDeltaTotal);
 
   emit(options.onEvent, "phase_started", { phase: "bundle_packaging", jobId: options.jobId });
 
@@ -70,12 +73,14 @@ export async function runBrownfieldJob(options: BrownfieldJobOptions): Promise<B
       granularityPrompt: options.granularityPrompt,
       advisorPrompt: options.advisorPrompt ?? null,
       tokenEstimateStart: bootstrap.tokenEstimateStart,
-      tokenEstimateEnd: bootstrap.tokenEstimateStart,
-      tokenReduction: computeTokenReduction(bootstrap.tokenEstimateStart, bootstrap.tokenEstimateStart),
+      tokenEstimateEnd,
+      tokenReduction: computeTokenReduction(bootstrap.tokenEstimateStart, tokenEstimateEnd),
       shardCount: bootstrap.shardCount,
       commitDepth: options.commitDepth ?? 50,
       commitsProcessed: commitWalk.commitsProcessed,
       commitsSkipped: commitWalk.commitsSkipped,
+      meanQaScore: commitWalk.meanQaScore,
+      calibrationOverlapMean: commitWalk.calibrationOverlapMean,
     },
   });
 
@@ -89,9 +94,10 @@ export async function runBrownfieldJob(options: BrownfieldJobOptions): Promise<B
     jobId: options.jobId,
     metrics: {
       tokenEstimateStart: bootstrap.tokenEstimateStart,
-      tokenEstimateEnd: bootstrap.tokenEstimateStart,
-      tokenReduction: computeTokenReduction(bootstrap.tokenEstimateStart, bootstrap.tokenEstimateStart),
-      meanQaScore: null,
+      tokenEstimateEnd,
+      tokenReduction: computeTokenReduction(bootstrap.tokenEstimateStart, tokenEstimateEnd),
+      meanQaScore: commitWalk.meanQaScore,
+      calibrationOverlapMean: commitWalk.calibrationOverlapMean,
       commitsProcessed: commitWalk.commitsProcessed,
       commitsSkipped: commitWalk.commitsSkipped,
     },
@@ -102,9 +108,11 @@ export async function runBrownfieldJob(options: BrownfieldJobOptions): Promise<B
     workspaceDir: bootstrap.workspaceDir,
     zipPath,
     tokenEstimateStart: bootstrap.tokenEstimateStart,
-    tokenEstimateEnd: bootstrap.tokenEstimateStart,
+    tokenEstimateEnd,
     shardCount: bootstrap.shardCount,
     commitsProcessed: commitWalk.commitsProcessed,
     commitsSkipped: commitWalk.commitsSkipped,
+    meanQaScore: commitWalk.meanQaScore,
+    calibrationOverlapMean: commitWalk.calibrationOverlapMean,
   };
 }

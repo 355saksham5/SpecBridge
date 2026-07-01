@@ -52,6 +52,11 @@ async function main(): Promise<void> {
     issueKeyPattern: args.issueKeyPattern as string | undefined,
     cursorApiKey: process.env.CURSOR_API_KEY,
     mockAgents: mock,
+    validation: {
+      devilsAdvocateQuestionCount: args.questionCount ? Number(args.questionCount) : undefined,
+      minAnswerScore: args.minAnswerScore ? Number(args.minAnswerScore) : undefined,
+      maxRoundsPerCommit: args.maxRounds ? Number(args.maxRounds) : undefined,
+    },
     onEvent: (event) => {
       if ("type" in event && "payload" in event) {
         console.log(`event: ${event.type}`);
@@ -64,8 +69,9 @@ async function main(): Promise<void> {
   console.log(`# Job complete`);
   console.log(`# ZIP: ${result.zipPath}`);
   console.log(`# Shards: ${result.shardCount}`);
-  console.log(`# Tokens (start): ${result.tokenEstimateStart}`);
+  console.log(`# Tokens (start -> end): ${result.tokenEstimateStart} -> ${result.tokenEstimateEnd}`);
   console.log(`# Commits processed: ${result.commitsProcessed}, skipped: ${result.commitsSkipped}`);
+  console.log(`# Mean QA score: ${result.meanQaScore ?? "n/a"}, calibration overlap mean: ${result.calibrationOverlapMean ?? "n/a"}`);
 }
 
 main().catch((err) => {

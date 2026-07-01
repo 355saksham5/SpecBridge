@@ -79,6 +79,54 @@ describe("commit walk integration", () => {
     );
     const report = JSON.parse(manifestRaw);
     expect(report.commits).toHaveLength(2);
-    expect(report.commits.find((c: { jiraKey: string | null }) => c.jiraKey === "PROJ-42")).toBeTruthy();
+    const proj42 = report.commits.find((c: { jiraKey: string | null }) => c.jiraKey === "PROJ-42");
+    expect(proj42).toBeTruthy();
+
+    // Calibration loop ran for the Jira-linked commit and produced a quality signal.
+    expect(proj42.calibration).toBeTruthy();
+    expect(proj42.calibration.roundsRun).toBe(1);
+    expect(proj42.calibration.finalPass).toBe(true);
+    expect(proj42.calibration.qaScore).toBeGreaterThan(0);
+    expect(report.meanQaScore).toBeGreaterThan(0);
+    expect(report.calibrationOverlapMean).toBeGreaterThanOrEqual(0);
+
+    // job-level token budget reflects the approved curator patch.
+    expect(result.meanQaScore).toBeCloseTo(report.meanQaScore, 5);
+    expect(result.tokenEstimateEnd).toBeGreaterThan(result.tokenEstimateStart);
+
+    // All four calibration-loop artifacts were written and are schema-valid JSON.
+    const calibrationDir = join(
+      outputDir,
+      "workspace",
+      ".sdd",
+      "reports",
+      "calibration",
+      proj42.commitSha,
+    );
+    const calibrationReport = JSON.parse(
+      await readFile(join(calibrationDir, "calibration-report.json"), "utf-8"),
+    );
+    expect(calibrationReport.commitSha).toBe(proj42.commitSha);
+    expect(calibrationReport.actualPaths).toContain("feature.ts");
+
+    const questions = JSON.parse(await readFile(join(calibrationDir, "questions.json"), "utf-8"));
+    expect(questions.questions.length).toBeGreaterThanOrEqual(5);
+
+    const curationProposal = JSON.parse(
+      await readFile(join(calibrationDir, "curation-proposal-round-1.json"), "utf-8"),
+    );
+    expect(curationProposal.answers.length).toBe(questions.questions.length);
+
+    const auditVerdict = JSON.parse(
+      await readFile(join(calibrationDir, "audit-verdict-round-1.json"), "utf-8"),
+    );
+    expect(auditVerdict.overallPass).toBe(true);
+    expect(auditVerdict.patches.every((p: { approved: boolean }) => p.approved)).toBe(true);
+
+    // The Knowledge Curator's approved patch actually landed in the knowledge store.
+    const knowledgeManifest = JSON.parse(
+      await readFile(join(outputDir, "workspace", ".sdd", "knowledge", "manifest.json"), "utf-8"),
+    );
+    expect(knowledgeManifest.tokenEstimateTotal).toBeGreaterThan(0);
   }, 60_000);
 });

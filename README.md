@@ -49,7 +49,7 @@ specbridge/
 
 This project follows **Specs-Driven Design** using the `csharp-sdd-starter-kit`. See [USAGE_GUIDE.md](./USAGE_GUIDE.md) for the complete workflow.
 
-**Current Phase**: Phase 3 — Commit Walk + Feature Historian (TypeScript packages + worker)
+**Current Phase**: Phase 4 — Calibration Loop (Commit Calibrator, Question Prober, Knowledge Curator, Knowledge Auditor)
 
 ## License
 

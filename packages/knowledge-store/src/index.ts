@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 
 export type GranularityPrompt =
   | "tokenize_function"
@@ -26,6 +28,17 @@ export type KnowledgeShard = {
   relativePath: string;
 };
 
+export type KnowledgeManifestShardEntry = {
+  id: string;
+  path: string;
+  relativePath: string;
+  tokenEstimate: number;
+  granularity: GranularityPrompt;
+  symbol?: string;
+  language?: string;
+  tags: string[];
+};
+
 export type KnowledgeManifest = {
   version: "1.0";
   generatedAt: string;
@@ -33,16 +46,7 @@ export type KnowledgeManifest = {
   granularity: GranularityPrompt;
   tokenEstimateTotal: number;
   shardCount: number;
-  shards: Array<{
-    id: string;
-    path: string;
-    relativePath: string;
-    tokenEstimate: number;
-    granularity: GranularityPrompt;
-    symbol?: string;
-    language?: string;
-    tags: string[];
-  }>;
+  shards: KnowledgeManifestShardEntry[];
   retrievalHints: {
     defaultGranularity: GranularityPrompt;
     maxShardTokens: number;
@@ -161,29 +165,181 @@ export function buildManifest(
   };
 }
 
+function knowledgeDirOf(baseDir: string): string {
+  return join(baseDir, ".sdd", "knowledge");
+}
+
+function shardFilePath(baseDir: string, relativePath: string): string {
+  return join(knowledgeDirOf(baseDir), relativePath.replace(/^\.sdd\/knowledge\//, ""));
+}
+
 export async function writeKnowledgeStore(
   baseDir: string,
   manifest: KnowledgeManifest,
   shards: KnowledgeShard[],
 ): Promise<void> {
-  const { mkdir, writeFile } = await import("node:fs/promises");
-  const { join } = await import("node:path");
-
-  const knowledgeDir = join(baseDir, ".sdd", "knowledge");
+  const knowledgeDir = knowledgeDirOf(baseDir);
   await mkdir(knowledgeDir, { recursive: true });
 
   await writeFile(join(knowledgeDir, "manifest.json"), JSON.stringify(manifest, null, 2), "utf-8");
 
   for (const shard of shards) {
-    const shardPath = join(knowledgeDir, shard.relativePath.replace(/^\.sdd\/knowledge\//, ""));
-    await mkdir(join(shardPath, ".."), { recursive: true });
-    await writeFile(shardPath, serializeShard(shard), "utf-8");
+    const filePath = shardFilePath(baseDir, shard.relativePath);
+    await mkdir(dirname(filePath), { recursive: true });
+    await writeFile(filePath, serializeShard(shard), "utf-8");
   }
 }
 
 export async function readManifest(baseDir: string): Promise<KnowledgeManifest> {
-  const { readFile } = await import("node:fs/promises");
-  const { join } = await import("node:path");
-  const raw = await readFile(join(baseDir, ".sdd", "knowledge", "manifest.json"), "utf-8");
+  const raw = await readFile(join(knowledgeDirOf(baseDir), "manifest.json"), "utf-8");
   return JSON.parse(raw) as KnowledgeManifest;
+}
+
+export type KnowledgePatchOperation = "replace" | "append" | "delete" | "update_weight";
+
+export type KnowledgePatch = {
+  /** Manifest shard `relativePath` (or `path`) this patch targets. */
+  targetPath: string;
+  operation: KnowledgePatchOperation;
+  content?: string;
+  /** Signed token count change this patch is expected to cause. Negative = reduction. */
+  tokenDelta?: number;
+};
+
+export type ApplyPatchesResult = {
+  manifest: KnowledgeManifest;
+  appliedCount: number;
+  skipped: Array<{ targetPath: string; reason: string }>;
+};
+
+/**
+ * Applies Knowledge Auditor-approved patches to the on-disk knowledge store
+ * and rewrites `manifest.json`. Only call with patches that have already
+ * passed audit — this function does not itself validate citations or scores.
+ */
+export async function applyApprovedPatches(baseDir: string, patches: KnowledgePatch[]): Promise<ApplyPatchesResult> {
+  const knowledgeDir = knowledgeDirOf(baseDir);
+  const manifest = await readManifest(baseDir);
+  const skipped: ApplyPatchesResult["skipped"] = [];
+  let appliedCount = 0;
+
+  for (const patch of patches) {
+    const filePath = shardFilePath(baseDir, patch.targetPath);
+    const entryIndex = manifest.shards.findIndex(
+      (s) => s.relativePath === patch.targetPath || s.path === patch.targetPath,
+    );
+
+    try {
+      const applied = await applyOnePatch(manifest, patch, filePath, entryIndex);
+      if (!applied.ok) {
+        skipped.push({ targetPath: patch.targetPath, reason: applied.reason });
+        continue;
+      }
+      manifest.tokenEstimateTotal = Math.max(0, manifest.tokenEstimateTotal + (patch.tokenDelta ?? 0));
+      appliedCount++;
+    } catch (err) {
+      skipped.push({ targetPath: patch.targetPath, reason: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  manifest.generatedAt = new Date().toISOString();
+  await mkdir(knowledgeDir, { recursive: true });
+  await writeFile(join(knowledgeDir, "manifest.json"), JSON.stringify(manifest, null, 2), "utf-8");
+
+  return { manifest, appliedCount, skipped };
+}
+
+async function applyOnePatch(
+  manifest: KnowledgeManifest,
+  patch: KnowledgePatch,
+  filePath: string,
+  entryIndex: number,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  switch (patch.operation) {
+    case "delete": {
+      if (entryIndex === -1) return { ok: false, reason: "shard not found in manifest" };
+      await unlink(filePath).catch(() => undefined);
+      manifest.shards.splice(entryIndex, 1);
+      manifest.shardCount = manifest.shards.length;
+      return { ok: true };
+    }
+
+    case "append":
+    case "replace": {
+      const shard = await loadOrCreateShard(manifest, patch, filePath, entryIndex);
+      shard.content =
+        patch.operation === "append"
+          ? `${shard.content.trim()}\n\n${patch.content ?? ""}`.trim()
+          : patch.content ?? "";
+      shard.frontMatter.tokenEstimate = estimateTokens(shard.content);
+
+      await mkdir(dirname(filePath), { recursive: true });
+      await writeFile(filePath, serializeShard(shard), "utf-8");
+
+      upsertManifestEntry(manifest, shard, entryIndex);
+      return { ok: true };
+    }
+
+    case "update_weight": {
+      if (entryIndex === -1) return { ok: false, reason: "shard not found in manifest" };
+      const weight = patch.content !== undefined ? Number(patch.content) : NaN;
+      if (Number.isNaN(weight)) return { ok: false, reason: "invalid weight value" };
+
+      const raw = await readFile(filePath, "utf-8").catch(() => null);
+      if (raw) {
+        const shard = parseShardMarkdown(raw, patch.targetPath);
+        shard.frontMatter.advisorRelevance = weight;
+        await writeFile(filePath, serializeShard(shard), "utf-8");
+      }
+      return { ok: true };
+    }
+
+    default:
+      return { ok: false, reason: `unknown operation: ${patch.operation}` };
+  }
+}
+
+async function loadOrCreateShard(
+  manifest: KnowledgeManifest,
+  patch: KnowledgePatch,
+  filePath: string,
+  entryIndex: number,
+): Promise<KnowledgeShard> {
+  if (entryIndex >= 0) {
+    const raw = await readFile(filePath, "utf-8").catch(() => null);
+    if (raw) return parseShardMarkdown(raw, patch.targetPath);
+  }
+
+  return {
+    relativePath: patch.targetPath,
+    frontMatter: {
+      id: computeShardId(patch.targetPath),
+      granularity: manifest.granularity,
+      path: patch.targetPath,
+      commitSha: manifest.headSha,
+      tokenEstimate: 0,
+      tags: ["curator-patch"],
+    },
+    content: "",
+  };
+}
+
+function upsertManifestEntry(manifest: KnowledgeManifest, shard: KnowledgeShard, entryIndex: number): void {
+  const entry: KnowledgeManifestShardEntry = {
+    id: shard.frontMatter.id,
+    path: shard.frontMatter.path,
+    relativePath: shard.relativePath,
+    tokenEstimate: shard.frontMatter.tokenEstimate,
+    granularity: shard.frontMatter.granularity,
+    symbol: shard.frontMatter.symbol,
+    language: shard.frontMatter.language,
+    tags: shard.frontMatter.tags,
+  };
+
+  if (entryIndex >= 0) {
+    manifest.shards[entryIndex] = entry;
+  } else {
+    manifest.shards.push(entry);
+    manifest.shardCount = manifest.shards.length;
+  }
 }

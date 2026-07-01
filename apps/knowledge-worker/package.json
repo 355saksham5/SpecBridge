@@ -16,6 +16,7 @@
   "dependencies": {
     "@specbridge/agent-orchestrator": "*",
     "@specbridge/bundle-packer": "*",
+    "@specbridge/calibration-metrics": "*",
     "@specbridge/commit-walker": "*",
     "@specbridge/jira-client": "*",
     "@specbridge/knowledge-store": "*",

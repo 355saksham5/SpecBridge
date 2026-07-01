@@ -17,11 +17,21 @@ import {
 } from "@specbridge/agent-orchestrator";
 import type { EmitFn } from "./bootstrap-pipeline.js";
 import { emit } from "./bootstrap-pipeline.js";
+import { runCalibrationLoop } from "./calibration-pipeline.js";
 
 export type JiraEnrichmentOptions = {
   /** Pre-resolved Authorization header value (`Bearer …` / `Basic …`). Never a raw secret name. */
   baseUrl: string;
   authHeader: string;
+};
+
+export type ValidationOptions = {
+  /** Number of Question Prober questions per commit. Default 10, range 5–30. */
+  devilsAdvocateQuestionCount?: number;
+  /** Minimum mean Knowledge Auditor score to pass. Default 0.75. */
+  minAnswerScore?: number;
+  /** Curator↔Auditor retry rounds per commit before accepting the last verdict. Default 1, range 1–3. */
+  maxRoundsPerCommit?: number;
 };
 
 export type CommitWalkOptions = {
@@ -36,7 +46,18 @@ export type CommitWalkOptions = {
   jira?: JiraEnrichmentOptions;
   cursorApiKey?: string;
   mockAgents?: boolean;
+  validation?: ValidationOptions;
   onEvent?: EmitFn;
+};
+
+export type CalibrationSummary = {
+  overlapPercent: number;
+  qaScore: number;
+  tokenDelta: number;
+  roundsRun: number;
+  finalPass: boolean;
+  patchesApproved: number;
+  patchesRejected: number;
 };
 
 export type ProcessedCommitRecord = {
@@ -45,6 +66,7 @@ export type ProcessedCommitRecord = {
   skippedReason: "no_jira_key" | null;
   changedPaths: string[];
   retroSpecPath: string | null;
+  calibration: CalibrationSummary | null;
 };
 
 export type CommitWalkResult = {
@@ -52,6 +74,12 @@ export type CommitWalkResult = {
   commitsSkipped: number;
   commits: ProcessedCommitRecord[];
   reportPath: string;
+  /** Mean Knowledge Auditor score across processed commits, or null if none were processed. */
+  meanQaScore: number | null;
+  /** Mean calibration overlap across processed commits, or null if none were processed. */
+  calibrationOverlapMean: number | null;
+  /** Sum of approved-patch token deltas applied to the knowledge store across the whole walk. */
+  tokenDeltaTotal: number;
 };
 
 function mockJiraIssue(key: string): JiraIssue {
@@ -112,6 +140,7 @@ export async function runCommitWalkPhase(options: CommitWalkOptions): Promise<Co
         skippedReason: "no_jira_key",
         changedPaths: [],
         retroSpecPath: null,
+        calibration: null,
       });
       continue;
     }
@@ -126,9 +155,30 @@ export async function runCommitWalkPhase(options: CommitWalkOptions): Promise<Co
     commitsProcessed++;
   }
 
-  const reportPath = await writeCommitWalkReport(options.workspaceDir, options.jobId, records);
+  const calibrated = records.map((r) => r.calibration).filter((c): c is CalibrationSummary => c !== null);
+  const meanQaScore = calibrated.length ? average(calibrated.map((c) => c.qaScore)) : null;
+  const calibrationOverlapMean = calibrated.length ? average(calibrated.map((c) => c.overlapPercent)) : null;
+  const tokenDeltaTotal = calibrated.reduce((sum, c) => sum + c.tokenDelta, 0);
 
-  return { commitsProcessed, commitsSkipped, commits: records, reportPath };
+  const reportPath = await writeCommitWalkReport(options.workspaceDir, options.jobId, records, {
+    meanQaScore,
+    calibrationOverlapMean,
+    tokenDeltaTotal,
+  });
+
+  return {
+    commitsProcessed,
+    commitsSkipped,
+    commits: records,
+    reportPath,
+    meanQaScore,
+    calibrationOverlapMean,
+    tokenDeltaTotal,
+  };
+}
+
+function average(values: number[]): number {
+  return Math.round((values.reduce((sum, v) => sum + v, 0) / values.length) * 1000) / 1000;
 }
 
 async function processJiraLinkedCommit(
@@ -172,12 +222,35 @@ async function processJiraLinkedCommit(
 
   await session.writeHandoff(outputPath, result.result ?? "", commit.sha);
 
+  const calibration = await runCalibrationLoop({
+    jobId: ctx.jobId,
+    workspaceDir: ctx.workspaceDir,
+    commitSha: commit.sha,
+    retroSpecRelativePath: outputPath,
+    actualChangedPaths: changedPaths,
+    cursorApiKey: ctx.cursorApiKey,
+    mock: ctx.mock,
+    onEvent: ctx.onEvent,
+    devilsAdvocateQuestionCount: ctx.validation?.devilsAdvocateQuestionCount,
+    minAnswerScore: ctx.validation?.minAnswerScore,
+    maxRoundsPerCommit: ctx.validation?.maxRoundsPerCommit,
+  });
+
   return {
     commitSha: commit.sha,
     jiraKey,
     skippedReason: null,
     changedPaths,
     retroSpecPath: outputPath,
+    calibration: {
+      overlapPercent: calibration.calibrationReport.overlapPercent,
+      qaScore: calibration.qaScore,
+      tokenDelta: calibration.tokenDelta,
+      roundsRun: calibration.roundsRun,
+      finalPass: calibration.finalPass,
+      patchesApproved: calibration.patchesApproved,
+      patchesRejected: calibration.patchesRejected,
+    },
   };
 }
 
@@ -223,6 +296,7 @@ async function writeCommitWalkReport(
   workspaceDir: string,
   jobId: string,
   records: ProcessedCommitRecord[],
+  aggregate: { meanQaScore: number | null; calibrationOverlapMean: number | null; tokenDeltaTotal: number },
 ): Promise<string> {
   const reportsDir = join(workspaceDir, ".sdd", "reports");
   await mkdir(reportsDir, { recursive: true });
@@ -232,6 +306,7 @@ async function writeCommitWalkReport(
     jobId,
     generatedAt: new Date().toISOString(),
     commits: records,
+    ...aggregate,
   };
 
   await writeFile(reportPath, JSON.stringify(report, null, 2), "utf-8");
