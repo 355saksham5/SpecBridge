@@ -1,9 +1,12 @@
 import { ServiceBusClient, type ServiceBusReceivedMessage } from "@azure/service-bus";
 import { mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { runBrownfieldJob, type BrownfieldJobOptions } from "./job-pipeline.js";
 import { createTracingEmit } from "./telemetry.js";
+
+const WORKER_REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 
 export type JobMessage = {
   jobId: string;
@@ -39,6 +42,7 @@ export async function startServiceBusConsumer(options: ServiceBusConsumerOptions
     }
 
     const outputDir = body.options.outputDir ?? join(tmpdir(), "specbridge-jobs", body.jobId);
+    const repoPath = body.options.repoPath ?? process.env.SPECBRIDGE_REPO_PATH ?? WORKER_REPO_ROOT;
     await mkdir(outputDir, { recursive: true });
 
     const onEvent = createTracingEmit(options.onEvent, {
@@ -52,7 +56,11 @@ export async function startServiceBusConsumer(options: ServiceBusConsumerOptions
       await runBrownfieldJob({
         ...body.options,
         jobId: body.jobId,
+        repoPath,
         outputDir,
+        branch: body.options.branch ?? "main",
+        headSha: body.options.headSha ?? "HEAD",
+        mockAgents: body.options.mockAgents ?? !process.env.CURSOR_API_KEY,
         onEvent,
       });
       await receiver.completeMessage(message);

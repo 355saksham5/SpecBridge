@@ -5,6 +5,7 @@ using FluentValidation.AspNetCore;
 using Microsoft.EntityFrameworkCore;
 using Azure.Identity;
 using Azure.Security.KeyVault.Secrets;
+using SpecBridge.Api.Contracts;
 using SpecBridge.Api.Data;
 using SpecBridge.Api.Middleware;
 using SpecBridge.Api.Services;
@@ -22,6 +23,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddMicrosoftIdentityWebApi(builder.Configuration.GetSection("EntraId"));
 
 builder.Services.AddAuthorization();
+builder.Services.AddHttpContextAccessor();
 
 var connectionString = builder.Configuration.GetConnectionString("PostgreSQL")
     ?? throw new InvalidOperationException("PostgreSQL connection string not found");
@@ -40,6 +42,8 @@ builder.Services.AddSingleton<GhesHostRegistry>();
 builder.Services.AddSingleton<JobCancellationRegistry>();
 builder.Services.AddSingleton<BrownfieldJobQueue>();
 builder.Services.AddSingleton<RepoPreflightService>();
+builder.Services.AddScoped<TenantContext>();
+builder.Services.AddScoped<BrownfieldJobService>();
 builder.Services.AddHttpClient();
 
 builder.Services.AddFluentValidationAutoValidation();
@@ -87,7 +91,7 @@ app.MapGet("/health", () => Results.Ok(new
 {
     status = "healthy",
     timestamp = DateTime.UtcNow,
-    version = "1.0.0-phase6"
+    version = "1.0.0-phase7"
 }))
 .AllowAnonymous()
 .WithName("GetHealth")
@@ -148,53 +152,85 @@ app.MapGet("/v1/brownfield-jobs", () => Results.Ok(new { jobs = Array.Empty<obje
     .WithTags("Brownfield Jobs");
 
 app.MapPost("/v1/brownfield-jobs", async (
-    BrownfieldJobQueue queue,
-    GhesHostRegistry registry,
-    HttpContext http) =>
+    CreateBrownfieldJobRequest request,
+    BrownfieldJobService jobs,
+    CancellationToken cancellationToken) =>
 {
-    if (!http.Request.Headers.TryGetValue("X-Repo-Url", out var repoUrlHeader))
+    var (job, errors, statusCode, detail) = await jobs.CreateAsync(request, cancellationToken);
+
+    if (errors is not null)
     {
-        return Results.BadRequest(new { title = "Missing repo URL", detail = "Provide X-Repo-Url header until full request body validation lands in Phase 6+" });
+        return Results.ValidationProblem(errors, statusCode: statusCode);
     }
 
-    var repoUrl = repoUrlHeader.ToString();
-    if (!RepoUrlValidation.TryParse(repoUrl, out var uri, out var parseError))
+    if (job is null)
     {
-        return Results.BadRequest(new { title = "Invalid repoUrl", detail = parseError });
+        return Results.Json(new { title = "Forbidden", detail }, statusCode: statusCode);
     }
 
-    if (!registry.IsAllowedHost(uri!.Host))
-    {
-        return Results.BadRequest(new
-        {
-            title = "Host not allowlisted",
-            detail = $"Host '{uri.Host}' is not permitted.",
-        });
-    }
-
-    var jobId = Guid.NewGuid();
-    var payload = new
-    {
-        jobId,
-        organizationId = http.User.FindFirst("org_id")?.Value,
-        options = new { repoUrl, enqueuedAt = DateTime.UtcNow },
-    };
-
-    if (queue.IsConfigured)
-    {
-        await queue.EnqueueAsync(payload);
-    }
-
+    var jobId = job.Id;
     return Results.Accepted($"/v1/brownfield-jobs/{jobId}", new
     {
         jobId,
-        status = "queued",
-        repoUrl,
-        createdAt = DateTime.UtcNow,
+        status = job.Status,
+        estimatedCommitsToProcess = request.History?.CommitDepth ?? 50,
+        createdAt = job.CreatedAt,
+        _links = new
+        {
+            self = $"/v1/brownfield-jobs/{jobId}",
+            events = $"/v1/brownfield-jobs/{jobId}/events",
+            bundle = $"/v1/brownfield-jobs/{jobId}/bundle",
+            report = $"/v1/brownfield-jobs/{jobId}/report",
+            cancel = $"/v1/brownfield-jobs/{jobId}/cancel",
+        },
     });
 })
 .RequireAuthorization()
 .WithName("CreateBrownfieldJob")
+.WithTags("Brownfield Jobs");
+
+app.MapGet("/v1/brownfield-jobs/{id:guid}", async (
+    Guid id,
+    BrownfieldJobService jobs,
+    CancellationToken cancellationToken) =>
+{
+    var (job, statusCode) = await jobs.GetByIdAsync(id, cancellationToken);
+
+    if (job is null)
+    {
+        return statusCode == StatusCodes.Status403Forbidden
+            ? Results.Json(new { title = "Forbidden", detail = "Missing org_id claim on authenticated principal." }, statusCode: statusCode)
+            : Results.NotFound(new { title = "Job not found", detail = $"No job with id '{id}' for this organization." });
+    }
+
+    return Results.Ok(new
+    {
+        jobId = job.Id,
+        status = job.Status,
+        repoUrl = job.RepoUrl,
+        headSha = job.HeadSha,
+        currentPhase = job.CurrentPhase,
+        currentAgentRole = job.CurrentAgentRole,
+        commitsProcessed = job.CommitsProcessed,
+        commitsSkipped = job.CommitsSkipped,
+        tokenEstimateStart = job.TokenEstimateStart,
+        tokenEstimateCurrent = job.TokenEstimateCurrent,
+        meanQaScore = job.MeanQaScore,
+        prUrl = job.PrUrl,
+        createdAt = job.CreatedAt,
+        updatedAt = job.UpdatedAt,
+        _links = new
+        {
+            self = $"/v1/brownfield-jobs/{job.Id}",
+            events = $"/v1/brownfield-jobs/{job.Id}/events",
+            bundle = $"/v1/brownfield-jobs/{job.Id}/bundle",
+            report = $"/v1/brownfield-jobs/{job.Id}/report",
+            cancel = $"/v1/brownfield-jobs/{job.Id}/cancel",
+        },
+    });
+})
+.RequireAuthorization()
+.WithName("GetBrownfieldJob")
 .WithTags("Brownfield Jobs");
 
 app.MapPost("/v1/brownfield-jobs/{id:guid}/cancel", async (

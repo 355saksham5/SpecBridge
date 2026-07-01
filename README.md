@@ -51,7 +51,7 @@ specbridge/
 
 This project follows **Specs-Driven Design** using the `csharp-sdd-starter-kit`. See [USAGE_GUIDE.md](./USAGE_GUIDE.md) for the complete workflow.
 
-**Current Phase**: Phase 6 complete — hardening (code-parser, recorded CI mocks, GHES allowlist, audit log sanitizer, monorepo shard caps). All implementation phases done.
+**Current Phase**: Phase 7 — API job contract (FluentValidation DTOs, tenant credential checks, GET job by id). Phases 0–6 implementation complete.
 
 ## License
 

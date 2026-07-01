@@ -18,13 +18,18 @@
 - ✅ Health check endpoint
 - ✅ Placeholder job CRUD endpoints
 
-**Pending (Phase 1 completion):**
+**Implemented (Phase 7):**
+- ✅ Full `CreateBrownfieldJobRequest` DTO aligned with OpenAPI
+- ✅ FluentValidation rules (repoUrl, GHES allowlist, ranges, nested options)
+- ✅ Tenant credential checks (GitHub + Cursor + optional Jira connections)
+- ✅ `BrownfieldJobService` — persist job, enqueue worker message
+- ✅ `GET /v1/brownfield-jobs/{id}` with tenant isolation
+- ✅ EF entity configurations (ready for `dotnet ef migrations add Initial`)
+
+**Pending:**
 - ⏳ EF Core migrations (`dotnet ef migrations add Initial`)
-- ⏳ Full endpoint implementation (15 endpoints from OpenAPI spec)
 - ⏳ SSE endpoint (`/v1/brownfield-jobs/{id}/events`)
-- ⏳ FluentValidation rules for request DTOs
-- ⏳ Service layer (job orchestration, tenant context)
-- ⏳ Service Bus message publisher
+- ⏳ Bundle/report download endpoints
 - ⏳ ProblemDetails middleware
 
 ## Running Locally
