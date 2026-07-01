@@ -14,10 +14,13 @@
     "dev": "node --import tsx src/index.ts"
   },
   "dependencies": {
+    "@azure/service-bus": "^7.9.5",
     "@specbridge/agent-orchestrator": "*",
     "@specbridge/bundle-packer": "*",
     "@specbridge/calibration-metrics": "*",
     "@specbridge/commit-walker": "*",
+    "@specbridge/confluence-client": "*",
+    "@specbridge/github-client": "*",
     "@specbridge/jira-client": "*",
     "@specbridge/knowledge-store": "*",
     "@specbridge/stack-detect": "*"

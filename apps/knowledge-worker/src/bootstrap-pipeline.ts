@@ -19,6 +19,7 @@ import {
   type OrchestratorEvent,
 } from "@specbridge/agent-orchestrator";
 import { packBundle, vendorSddKit, computeTokenReduction } from "@specbridge/bundle-packer";
+import { ConfluenceClient, buildConfluenceContext } from "@specbridge/confluence-client";
 
 export const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 
@@ -39,6 +40,15 @@ export function defaultSddKit(): SddKitRef {
   return { id: "csharp-sdd-starter-kit", version: "1.0.0", sourceDir: REPO_ROOT };
 }
 
+export type ConfluenceEnrichmentOptions = {
+  /** Confluence Cloud base URL (e.g. `https://acme.atlassian.net/wiki`). */
+  baseUrl: string;
+  /** Pre-resolved Authorization header — never a raw secret name. */
+  authHeader: string;
+  /** Numeric Confluence page ids to fetch as Knowledge Architect advisor context. Max 25. */
+  pageIds: string[];
+};
+
 export type BootstrapJobOptions = {
   jobId: string;
   repoPath: string;
@@ -53,6 +63,7 @@ export type BootstrapJobOptions = {
   cursorApiKey?: string;
   mockAgents?: boolean;
   sddKit?: SddKitRef;
+  confluence?: ConfluenceEnrichmentOptions;
   onEvent?: EmitFn;
 };
 
@@ -106,10 +117,29 @@ export async function bootstrapKnowledgeAtHead(options: BootstrapJobOptions): Pr
     loadCouncilPrompts(),
   ]);
 
+  let confluenceContext: string | undefined;
+  if (options.confluence && options.confluence.pageIds.length > 0) {
+    const client = new ConfluenceClient({
+      baseUrl: options.confluence.baseUrl,
+      authHeader: options.confluence.authHeader,
+    });
+    const ctx = await buildConfluenceContext(client, options.confluence.pageIds);
+    if (ctx.markdown) {
+      confluenceContext = ctx.markdown;
+      await writeFile(join(artifactsDir, "confluence-context.md"), ctx.markdown, "utf-8");
+      emit(options.onEvent, "confluence_context_fetched", {
+        jobId: options.jobId,
+        pageCount: ctx.pages.length,
+        missingPageIds: ctx.missingPageIds,
+      });
+    }
+  }
+
   const systemPrompt = buildKnowledgeArchitectSystemPrompt(basePrompt, council.code, council.deploy, {
     stackProfileJson: JSON.stringify(stackProfile, null, 2),
     granularityPrompt: options.granularityPrompt,
     advisorPrompt: options.advisorPrompt,
+    confluenceContext,
   });
 
   const taskDescription = [

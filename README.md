@@ -49,7 +49,7 @@ specbridge/
 
 This project follows **Specs-Driven Design** using the `csharp-sdd-starter-kit`. See [USAGE_GUIDE.md](./USAGE_GUIDE.md) for the complete workflow.
 
-**Current Phase**: Phase 4 — Calibration Loop (Commit Calibrator, Question Prober, Knowledge Curator, Knowledge Auditor)
+**Current Phase**: Phase 5 complete — Azure production skeleton (Service Bus, Bicep, PR delivery, Confluence ingest, cancel, rate limiting). Next: Phase 6 hardening.
 
 ## License
 

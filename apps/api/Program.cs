@@ -5,32 +5,29 @@ using FluentValidation.AspNetCore;
 using Microsoft.EntityFrameworkCore;
 using Azure.Identity;
 using Azure.Security.KeyVault.Secrets;
-using Swashbuckle.AspNetCore.SwaggerGen;
 using SpecBridge.Api.Data;
+using SpecBridge.Api.Middleware;
+using SpecBridge.Api.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// =====  Configuration =====
 builder.Configuration.AddEnvironmentVariables("SPECBRIDGE_");
 if (builder.Environment.IsDevelopment())
 {
     builder.Configuration.AddUserSecrets<Program>();
 }
 
-// ===== Authentication & Authorization =====
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddMicrosoftIdentityWebApi(builder.Configuration.GetSection("EntraId"));
 
 builder.Services.AddAuthorization();
 
-// ===== Database =====
-var connectionString = builder.Configuration.GetConnectionString("PostgreSQL") 
+var connectionString = builder.Configuration.GetConnectionString("PostgreSQL")
     ?? throw new InvalidOperationException("PostgreSQL connection string not found");
 
 builder.Services.AddDbContext<SpecBridgeDbContext>(options =>
     options.UseNpgsql(connectionString));
 
-// ===== Azure Services =====
 var keyVaultUri = builder.Configuration["Azure:KeyVaultUri"];
 if (!string.IsNullOrEmpty(keyVaultUri))
 {
@@ -38,11 +35,12 @@ if (!string.IsNullOrEmpty(keyVaultUri))
     builder.Services.AddSingleton(sp => new SecretClient(new Uri(keyVaultUri), credential));
 }
 
-// ===== Validation =====
+builder.Services.AddSingleton<JobCancellationRegistry>();
+builder.Services.AddSingleton<BrownfieldJobQueue>();
+
 builder.Services.AddFluentValidationAutoValidation();
 builder.Services.AddValidatorsFromAssemblyContaining<Program>();
 
-// ===== OpenTelemetry & Application Insights =====
 var appInsightsKey = builder.Configuration["ApplicationInsights:ConnectionString"];
 if (!string.IsNullOrEmpty(appInsightsKey))
 {
@@ -52,11 +50,9 @@ if (!string.IsNullOrEmpty(appInsightsKey))
     });
 }
 
-// ===== Swagger / OpenAPI =====
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
-// ===== CORS (for local dev) =====
 if (builder.Environment.IsDevelopment())
 {
     builder.Services.AddCors(options =>
@@ -70,10 +66,8 @@ if (builder.Environment.IsDevelopment())
     });
 }
 
-// ===== Build Application =====
 var app = builder.Build();
 
-// ===== Middleware Pipeline =====
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -83,21 +77,18 @@ if (app.Environment.IsDevelopment())
 
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseMiddleware<OrgRateLimitMiddleware>();
 
-// ===== API Endpoints =====
-
-// Health check
 app.MapGet("/health", () => Results.Ok(new
 {
     status = "healthy",
     timestamp = DateTime.UtcNow,
-    version = "1.0.0-phase1"
+    version = "1.0.0-phase5"
 }))
 .AllowAnonymous()
 .WithName("GetHealth")
 .WithTags("Health");
 
-// Root
 app.MapGet("/", () => Results.Ok(new
 {
     service = "SpecBridge API",
@@ -108,20 +99,54 @@ app.MapGet("/", () => Results.Ok(new
 .AllowAnonymous()
 .WithName("GetRoot");
 
-// Placeholder endpoints (Phase 1 skeleton)
 app.MapGet("/v1/brownfield-jobs", () => Results.Ok(new { jobs = Array.Empty<object>() }))
     .RequireAuthorization()
     .WithName("ListBrownfieldJobs")
     .WithTags("Brownfield Jobs");
 
-app.MapPost("/v1/brownfield-jobs", () => Results.Accepted("/v1/brownfield-jobs/fake-job-id", new
+app.MapPost("/v1/brownfield-jobs", async (BrownfieldJobQueue queue, HttpContext http) =>
 {
-    jobId = Guid.NewGuid(),
-    status = "queued",
-    createdAt = DateTime.UtcNow
-}))
+    var jobId = Guid.NewGuid();
+    var payload = new
+    {
+        jobId,
+        organizationId = http.User.FindFirst("org_id")?.Value,
+        options = new { enqueuedAt = DateTime.UtcNow },
+    };
+
+    if (queue.IsConfigured)
+    {
+        await queue.EnqueueAsync(payload);
+    }
+
+    return Results.Accepted($"/v1/brownfield-jobs/{jobId}", new
+    {
+        jobId,
+        status = "queued",
+        createdAt = DateTime.UtcNow,
+    });
+})
 .RequireAuthorization()
 .WithName("CreateBrownfieldJob")
+.WithTags("Brownfield Jobs");
+
+app.MapPost("/v1/brownfield-jobs/{id:guid}/cancel", async (
+    Guid id,
+    JobCancellationRegistry registry,
+    BrownfieldJobQueue queue) =>
+{
+    registry.RequestCancel(id);
+    await queue.PublishCancelAsync(id);
+
+    return Results.Accepted($"/v1/brownfield-jobs/{id}", new
+    {
+        jobId = id,
+        status = "cancelled",
+        message = "Cancellation requested. In-flight Cursor agent runs will stop at the next checkpoint; partial artifacts are preserved.",
+    });
+})
+.RequireAuthorization()
+.WithName("CancelBrownfieldJob")
 .WithTags("Brownfield Jobs");
 
 app.Run();

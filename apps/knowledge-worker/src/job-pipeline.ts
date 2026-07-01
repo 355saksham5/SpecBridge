@@ -3,8 +3,17 @@ import { packBundle, computeTokenReduction } from "@specbridge/bundle-packer";
 import { getHeadSha, type WalkOrder, type JiraExtractSource } from "@specbridge/commit-walker";
 import { bootstrapKnowledgeAtHead, emit, type BootstrapJobOptions } from "./bootstrap-pipeline.js";
 import { runCommitWalkPhase, type JiraEnrichmentOptions, type ValidationOptions } from "./commit-walk-pipeline.js";
+import { openOnboardingPullRequest, type GitHubDeliveryOptions } from "./pr-delivery.js";
 
 const FULL_SHA_PATTERN = /^[0-9a-f]{40}$/;
+
+export type DeliveryOptions = {
+  openPr?: boolean;
+  prTitle?: string;
+  prBranch?: string;
+  prBody?: string;
+  github?: GitHubDeliveryOptions;
+};
 
 export type BrownfieldJobOptions = BootstrapJobOptions & {
   walkOrder?: WalkOrder;
@@ -12,6 +21,7 @@ export type BrownfieldJobOptions = BootstrapJobOptions & {
   extractFrom?: JiraExtractSource[];
   jira?: JiraEnrichmentOptions;
   validation?: ValidationOptions;
+  delivery?: DeliveryOptions;
 };
 
 export type BrownfieldJobResult = {
@@ -25,6 +35,7 @@ export type BrownfieldJobResult = {
   commitsSkipped: number;
   meanQaScore: number | null;
   calibrationOverlapMean: number | null;
+  prUrl: string | null;
 };
 
 /**
@@ -90,6 +101,23 @@ export async function runBrownfieldJob(options: BrownfieldJobOptions): Promise<B
     jobId: options.jobId,
   });
 
+  let prUrl: string | null = null;
+  if (options.delivery?.openPr && options.delivery.github) {
+    emit(options.onEvent, "phase_started", { phase: "pr_delivery", jobId: options.jobId });
+    const pr = await openOnboardingPullRequest({
+      repoUrl: options.repoUrl,
+      baseBranch: options.branch,
+      jobId: options.jobId,
+      workspaceDir: bootstrap.workspaceDir,
+      prTitle: options.delivery.prTitle,
+      prBranch: options.delivery.prBranch,
+      prBody: options.delivery.prBody,
+      github: options.delivery.github,
+    });
+    prUrl = pr.url;
+    emit(options.onEvent, "pr_opened", { jobId: options.jobId, prUrl, prNumber: pr.number, branch: pr.branch });
+  }
+
   emit(options.onEvent, "job_completed", {
     jobId: options.jobId,
     metrics: {
@@ -101,6 +129,7 @@ export async function runBrownfieldJob(options: BrownfieldJobOptions): Promise<B
       commitsProcessed: commitWalk.commitsProcessed,
       commitsSkipped: commitWalk.commitsSkipped,
     },
+    prUrl,
   });
 
   return {
@@ -114,5 +143,6 @@ export async function runBrownfieldJob(options: BrownfieldJobOptions): Promise<B
     commitsSkipped: commitWalk.commitsSkipped,
     meanQaScore: commitWalk.meanQaScore,
     calibrationOverlapMean: commitWalk.calibrationOverlapMean,
+    prUrl,
   };
 }

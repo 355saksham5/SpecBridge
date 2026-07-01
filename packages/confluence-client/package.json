@@ -1,0 +1,23 @@
+{
+  "name": "@specbridge/confluence-client",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Confluence Cloud page fetch + HTML-to-Markdown context builder for Knowledge Architect ingestion",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "node-html-markdown": "^2.0.0"
+  },
+  "files": ["dist"]
+}

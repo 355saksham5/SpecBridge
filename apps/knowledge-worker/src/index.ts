@@ -29,6 +29,28 @@ function parseArgs(argv: string[]): Record<string, string | boolean> {
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
+
+  if (args["service-bus"] === true) {
+    const connectionString = process.env.SPECBRIDGE_SERVICE_BUS_CONNECTION;
+    const queueName = (process.env.SPECBRIDGE_SERVICE_BUS_QUEUE as string) ?? "brownfield-jobs";
+    if (!connectionString) {
+      console.error("SPECBRIDGE_SERVICE_BUS_CONNECTION is required for --service-bus mode");
+      process.exit(1);
+    }
+    const { startServiceBusConsumer } = await import("./service-bus-consumer.js");
+    await startServiceBusConsumer({
+      connectionString,
+      queueName,
+      onEvent: (event) => {
+        if ("type" in event && "payload" in event) {
+          console.log(`event: ${event.type}`);
+          console.log(`data: ${JSON.stringify(event.payload)}`);
+        }
+      },
+    });
+    return;
+  }
+
   const jobId = (args.jobId as string) ?? randomUUID();
   const repoPath = (args.repo as string) ?? REPO_ROOT;
   const outputDir = (args.output as string) ?? join(REPO_ROOT, "tmp", "jobs", jobId);
