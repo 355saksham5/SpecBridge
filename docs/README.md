@@ -31,6 +31,14 @@ This directory contains the OpenAPI contract, JSON schemas, and examples for the
   - File registry with SHA-256 checksums
   - Optional PR info
 
+## Plugin usage
+
+See **[`PLUGIN_USAGE.md`](./PLUGIN_USAGE.md)** for the full end-to-end guide: configure the Cursor plugin, create jobs, monitor SSE, download bundles, and start using SDD commands in your workspace.
+
+## Deployment
+
+See **[`DEPLOYMENT.md`](./DEPLOYMENT.md)** for production environment variables and Azure configuration.
+
 ## Validation
 
 ### OpenAPI Validation

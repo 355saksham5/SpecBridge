@@ -11,6 +11,7 @@ public sealed class BrownfieldJobConfiguration : IEntityTypeConfiguration<Brownf
         builder.ToTable("brownfield_jobs");
         builder.HasKey(j => j.Id);
         builder.Property(j => j.RepoUrl).HasMaxLength(2048).IsRequired();
+        builder.Property(j => j.Branch).HasMaxLength(255).IsRequired();
         builder.Property(j => j.Status).HasMaxLength(64).IsRequired();
         builder.Property(j => j.HeadSha).HasMaxLength(64);
         builder.Property(j => j.CurrentPhase).HasMaxLength(64);

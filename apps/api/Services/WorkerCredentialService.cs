@@ -14,10 +14,15 @@ public sealed class WorkerCredentialService
 {
     private readonly SpecBridgeDbContext _db;
     private readonly SecretClient? _secretClient;
+    private readonly AtlassianOAuthService _atlassianOAuth;
 
-    public WorkerCredentialService(SpecBridgeDbContext db, IServiceProvider serviceProvider)
+    public WorkerCredentialService(
+        SpecBridgeDbContext db,
+        AtlassianOAuthService atlassianOAuth,
+        IServiceProvider serviceProvider)
     {
         _db = db;
+        _atlassianOAuth = atlassianOAuth;
         _secretClient = serviceProvider.GetService<SecretClient>();
     }
 
@@ -90,11 +95,16 @@ public sealed class WorkerCredentialService
                 return (null, StatusCodes.Status404NotFound, "Jira connection not found for organization.");
             }
 
-            var jiraSecret = await _secretClient.GetSecretAsync(jira.KeyVaultSecretName, cancellationToken: cancellationToken);
+            var accessToken = await _atlassianOAuth.GetValidAccessTokenAsync(jira.KeyVaultSecretName, cancellationToken);
+            if (string.IsNullOrWhiteSpace(accessToken))
+            {
+                return (null, StatusCodes.Status503ServiceUnavailable, "Jira access token unavailable — reconnect Atlassian OAuth.");
+            }
+
             response.Jira = new WorkerJiraCredentials
             {
                 BaseUrl = jira.BaseUrl,
-                AuthHeader = FormatBearerHeader(jiraSecret.Value.Value),
+                AuthHeader = FormatBearerHeader(accessToken),
             };
         }
 

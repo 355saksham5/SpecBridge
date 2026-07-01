@@ -23,6 +23,26 @@ public sealed class BrownfieldJobService
         "job_failed",
     };
 
+    private static readonly HashSet<string> ActiveJobStatuses = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "queued",
+        "cloning",
+        "stack_detect",
+        "knowledge_bootstrap",
+        "commit_walk",
+        "validation",
+        "bundle_packaging",
+        "pr_opened",
+        "pr_delivery",
+    };
+
+    private static readonly HashSet<string> TerminalJobStatuses = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "completed",
+        "failed",
+        "cancelled",
+    };
+
     private readonly SpecBridgeDbContext _db;
     private readonly BrownfieldJobQueue _queue;
     private readonly IValidator<CreateBrownfieldJobRequest> _validator;
@@ -115,13 +135,30 @@ public sealed class BrownfieldJobService
             }
         }
 
+        var branch = string.IsNullOrWhiteSpace(request.DefaultBranch) ? "main" : request.DefaultBranch.Trim();
+        var repoUrl = request.RepoUrl.Trim();
+
+        var duplicateActive = await _db.BrownfieldJobs.AnyAsync(
+            j => j.OrganizationId == organizationId
+                 && j.RepoUrl == repoUrl
+                 && j.Branch == branch
+                 && ActiveJobStatuses.Contains(j.Status),
+            cancellationToken);
+
+        if (duplicateActive)
+        {
+            return (null, null, StatusCodes.Status409Conflict,
+                "An active job already exists for this repoUrl and branch.");
+        }
+
         var jobId = Guid.NewGuid();
         var now = DateTime.UtcNow;
         var job = new BrownfieldJob
         {
             Id = jobId,
             OrganizationId = organizationId,
-            RepoUrl = request.RepoUrl.Trim(),
+            RepoUrl = repoUrl,
+            Branch = branch,
             Status = "queued",
             CreatedAt = now,
             UpdatedAt = now,
@@ -157,6 +194,35 @@ public sealed class BrownfieldJobService
         }
 
         return (job, StatusCodes.Status200OK);
+    }
+
+    public async Task<(bool Accepted, int StatusCode, string? Detail)> CancelAsync(
+        Guid jobId,
+        CancellationToken cancellationToken = default)
+    {
+        if (!_tenantContext.TryGetOrganizationId(out _))
+        {
+            return (false, StatusCodes.Status403Forbidden, "Missing org_id claim on authenticated principal.");
+        }
+
+        var job = await _db.BrownfieldJobs.FirstOrDefaultAsync(j => j.Id == jobId, cancellationToken);
+        if (job is null)
+        {
+            return (false, StatusCodes.Status404NotFound, "Job not found.");
+        }
+
+        if (TerminalJobStatuses.Contains(job.Status))
+        {
+            return (false, StatusCodes.Status409Conflict, $"Job is already {job.Status} and cannot be cancelled.");
+        }
+
+        job.Status = "cancelled";
+        job.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync(cancellationToken);
+
+        _eventHub.Publish(jobId, "phase_started", new { phase = "cancelled", jobId });
+
+        return (true, StatusCodes.Status202Accepted, null);
     }
 
     public async Task<(IReadOnlyList<BrownfieldJob> Jobs, string? NextCursor, IReadOnlyDictionary<string, string[]>? Errors, int StatusCode)> ListAsync(

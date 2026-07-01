@@ -12,6 +12,7 @@ import {
   resolveWorkerCredentials,
   type WorkerJobCredentials,
 } from "./credential-resolver.js";
+import { cloneRepoShallow, shouldCloneRemoteRepo } from "./repo-clone.js";
 
 const WORKER_REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 
@@ -50,8 +51,17 @@ export async function startServiceBusConsumer(options: ServiceBusConsumerOptions
     }
 
     const outputDir = body.options.outputDir ?? join(tmpdir(), "specbridge-jobs", body.jobId);
-    const repoPath = body.options.repoPath ?? process.env.SPECBRIDGE_REPO_PATH ?? WORKER_REPO_ROOT;
     await mkdir(outputDir, { recursive: true });
+
+    let repoPath = body.options.repoPath ?? process.env.SPECBRIDGE_REPO_PATH ?? WORKER_REPO_ROOT;
+    if (shouldCloneRemoteRepo(body.options)) {
+      repoPath = join(outputDir, "repo");
+      await cloneRepoShallow(
+        body.options.repoUrl!,
+        repoPath,
+        body.options.branch ?? "main",
+      );
+    }
 
     const onEvent = createTracingEmit(
       wrapWithEventRelay(options.onEvent, body.jobId),

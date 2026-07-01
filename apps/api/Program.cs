@@ -26,11 +26,20 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 builder.Services.AddAuthorization();
 builder.Services.AddHttpContextAccessor();
 
-var connectionString = builder.Configuration.GetConnectionString("PostgreSQL")
-    ?? throw new InvalidOperationException("PostgreSQL connection string not found");
-
+var connectionString = builder.Configuration.GetConnectionString("PostgreSQL");
 builder.Services.AddDbContext<SpecBridgeDbContext>(options =>
-    options.UseNpgsql(connectionString));
+{
+    if (!string.IsNullOrWhiteSpace(connectionString))
+    {
+        options.UseNpgsql(connectionString);
+    }
+    else
+    {
+        options.UseNpgsql("Host=127.0.0.1;Port=5432;Database=__specbridge_unconfigured__;Username=unused;Password=unused");
+    }
+});
+
+builder.Services.AddScoped<ITenantContextAccessor, TenantContextAccessor>();
 
 var keyVaultUri = builder.Configuration["Azure:KeyVaultUri"];
 if (!string.IsNullOrEmpty(keyVaultUri))
@@ -53,7 +62,8 @@ builder.Services.AddScoped<BrownfieldJobService>();
 builder.Services.AddScoped<IntegrationsService>();
 builder.Services.AddScoped<WorkerCredentialService>();
 builder.Services.AddScoped<JobProgressWriter>();
-builder.Services.AddHttpClient();
+builder.Services.AddHttpClient<AtlassianOAuthService>();
+builder.Services.AddScoped<AtlassianOAuthService>();
 
 builder.Services.AddProblemDetails(options =>
 {
@@ -96,14 +106,22 @@ var app = builder.Build();
 
 using (var scope = app.Services.CreateScope())
 {
-    var db = scope.ServiceProvider.GetRequiredService<SpecBridgeDbContext>();
-    try
+    if (!string.IsNullOrWhiteSpace(app.Configuration.GetConnectionString("PostgreSQL")))
     {
-        await db.Database.MigrateAsync();
+        var db = scope.ServiceProvider.GetRequiredService<SpecBridgeDbContext>();
+        try
+        {
+            await db.Database.MigrateAsync();
+        }
+        catch (Exception ex)
+        {
+            app.Logger.LogWarning(ex, "Database migration skipped — ensure PostgreSQL is reachable for persistence.");
+        }
     }
-    catch (Exception ex)
+    else
     {
-        app.Logger.LogWarning(ex, "Database migration skipped — ensure PostgreSQL is reachable for persistence.");
+        app.Logger.LogWarning(
+            "PostgreSQL connection string not configured — set SPECBRIDGE_ConnectionStrings__PostgreSQL before using persistence endpoints.");
     }
 }
 
@@ -145,7 +163,7 @@ app.MapGet("/health", () => Results.Ok(new
 {
     status = "healthy",
     timestamp = DateTime.UtcNow,
-    version = "1.0.0-phase10"
+    version = "1.0.0"
 }))
 .AllowAnonymous()
 .WithName("GetHealth")
@@ -246,6 +264,11 @@ app.MapPost("/v1/brownfield-jobs", async (
     if (errors is not null)
     {
         return Results.ValidationProblem(errors, statusCode: statusCode);
+    }
+
+    if (statusCode == StatusCodes.Status409Conflict)
+    {
+        return Results.Conflict(new { title = "Conflict", detail });
     }
 
     if (job is null)
@@ -463,11 +486,24 @@ app.MapPost("/v1/internal/worker/resolve-credentials", async (
 
 app.MapPost("/v1/brownfield-jobs/{id:guid}/cancel", async (
     Guid id,
+    BrownfieldJobService jobs,
     JobCancellationRegistry registry,
-    BrownfieldJobQueue queue) =>
+    BrownfieldJobQueue queue,
+    CancellationToken cancellationToken) =>
 {
+    var (accepted, statusCode, detail) = await jobs.CancelAsync(id, cancellationToken);
+    if (!accepted)
+    {
+        return statusCode switch
+        {
+            StatusCodes.Status404NotFound => Results.NotFound(new { title = "Not found", detail }),
+            StatusCodes.Status409Conflict => Results.Conflict(new { title = "Conflict", detail }),
+            _ => Results.Json(new { title = "Forbidden", detail }, statusCode: statusCode),
+        };
+    }
+
     registry.RequestCancel(id);
-    await queue.PublishCancelAsync(id);
+    await queue.PublishCancelAsync(id, cancellationToken);
 
     return Results.Accepted($"/v1/brownfield-jobs/{id}", new
     {

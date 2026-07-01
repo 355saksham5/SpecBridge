@@ -8,6 +8,7 @@ public class BrownfieldJob
     public Guid Id { get; set; }
     public Guid OrganizationId { get; set; }
     public required string RepoUrl { get; set; }
+    public string Branch { get; set; } = "main";
     public required string Status { get; set; } // queued, cloning, knowledge_bootstrap, commit_walk, etc.
     public string? HeadSha { get; set; }
     public string? CurrentPhase { get; set; }

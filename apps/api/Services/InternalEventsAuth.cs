@@ -9,11 +9,12 @@ public sealed class InternalEventsAuth(IConfiguration configuration)
 {
     private readonly string? _expectedKey = configuration["Internal:EventsApiKey"];
 
-    public bool IsConfigured => !string.IsNullOrWhiteSpace(_expectedKey);
+    public bool IsConfigured =>
+        !string.IsNullOrWhiteSpace(_expectedKey) && _expectedKey!.Length >= 32;
 
     public bool TryValidate(string? providedKey)
     {
-        if (!IsConfigured || string.IsNullOrWhiteSpace(providedKey))
+        if (!IsConfigured || string.IsNullOrWhiteSpace(providedKey) || providedKey.Length < 32)
         {
             return false;
         }

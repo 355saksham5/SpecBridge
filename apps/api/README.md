@@ -45,9 +45,17 @@
 - ✅ SSE replay loads from PostgreSQL on subscribe (survives API restart)
 - ✅ E2E recorded job flow test (`tests/e2e-recorded-job-flow.test.ts`)
 
-**Pending:**
-- ⏳ Full Atlassian OAuth token exchange (connect still stores auth code in KV)
-- ⏳ Duplicate job (409) and cancel conflict (409) per OpenAPI
+**Customer-ready (post Phase 10):**
+- ✅ Atlassian OAuth code exchange + refresh (tokens in Key Vault as JSON bundle)
+- ✅ Duplicate active job → 409; cancel on terminal job → 409
+- ✅ JWT-scoped EF tenant query filters via `ITenantContextAccessor`
+- ✅ Production git shallow clone in worker when `repoPath` omitted
+- ✅ Safe committed config — all secrets via `SPECBRIDGE_*` env / Key Vault / user-secrets
+- ✅ Internal events API key minimum length (32 chars)
+- ✅ Deployment guide: [`docs/DEPLOYMENT.md`](../../docs/DEPLOYMENT.md)
+
+**Configure before production:**
+- Entra app registration, Azure resources, Atlassian OAuth app, Cursor plugin (customer-side)
 
 ## Running Locally
 
@@ -66,9 +74,9 @@
    docker run --name specbridge-pg -e POSTGRES_PASSWORD=dev_password -p 5432:5432 -d postgres:15
    ```
 
-2. **Update connection string:**
+2. **Configure secrets** (never commit):
 
-   Edit `appsettings.Development.json` if needed.
+   Use `dotnet user-secrets` or `SPECBRIDGE_*` environment variables — see [`docs/DEPLOYMENT.md`](../../docs/DEPLOYMENT.md).
 
 3. **Run migrations:**
 
@@ -95,7 +103,7 @@ Prefix all with `SPECBRIDGE_`:
 - `SPECBRIDGE_ConnectionStrings__PostgreSQL`
 - `SPECBRIDGE_EntraId__ClientId`
 - `SPECBRIDGE_Azure__KeyVaultUri`
-- `SPECBRIDGE_ApplicationInsights__ConnectionString`
+- `SPECBRIDGE_Atlassian__ClientSecret` (env only — never in appsettings.json)
 
 ### User Secrets (Local Dev)
 
@@ -141,7 +149,7 @@ All tenant-scoped entities (`BrownfieldJob`, `CursorCredential`, etc.) include `
 
 Global query filters are configured in `SpecBridgeDbContext.OnModelCreating`.
 
-**Tenant context** should be extracted from JWT claims (e.g., `oid` or custom `orgid` claim) and injected into HTTP context for filtering.
+**Tenant context** is extracted from the JWT `org_id` claim via `TenantContextAccessor` and applied as EF global query filters.
 
 ## Azure Services
 

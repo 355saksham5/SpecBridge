@@ -1,21 +1,23 @@
 using Microsoft.EntityFrameworkCore;
+using SpecBridge.Api.Data;
 using SpecBridge.Api.Data.Entities;
+using SpecBridge.Api.Services;
 
 namespace SpecBridge.Api.Data;
 
-/// <summary>
-/// EF Core DbContext for SpecBridge database.
-/// Supports PostgreSQL Flexible Server.
-/// </summary>
 public class SpecBridgeDbContext : DbContext
 {
-    public SpecBridgeDbContext(DbContextOptions<SpecBridgeDbContext> options)
+    private readonly ITenantContextAccessor _tenant;
+
+    public SpecBridgeDbContext(DbContextOptions<SpecBridgeDbContext> options, ITenantContextAccessor tenant)
         : base(options)
     {
+        _tenant = tenant;
     }
 
-    // ===== Tables =====
-    
+    /// <summary>Evaluated per query for EF global filters.</summary>
+    private Guid? CurrentOrganizationId => _tenant.CurrentOrganizationId;
+
     public DbSet<BrownfieldJob> BrownfieldJobs => Set<BrownfieldJob>();
     public DbSet<JobCommit> JobCommits => Set<JobCommit>();
     public DbSet<JobPhaseRun> JobPhaseRuns => Set<JobPhaseRun>();
@@ -29,15 +31,17 @@ public class SpecBridgeDbContext : DbContext
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
-        
-        // Apply entity configurations
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(SpecBridgeDbContext).Assembly);
-        
-        // Global query filters for tenant isolation
-        modelBuilder.Entity<BrownfieldJob>().HasQueryFilter(j => EF.Property<Guid>(j, "OrganizationId") != Guid.Empty);
-        modelBuilder.Entity<CursorCredential>().HasQueryFilter(c => EF.Property<Guid>(c, "OrganizationId") != Guid.Empty);
-        modelBuilder.Entity<GitHubConnection>().HasQueryFilter(g => EF.Property<Guid>(g, "OrganizationId") != Guid.Empty);
-        modelBuilder.Entity<JiraConnection>().HasQueryFilter(j => EF.Property<Guid>(j, "OrganizationId") != Guid.Empty);
-        modelBuilder.Entity<ConfluenceConnection>().HasQueryFilter(c => EF.Property<Guid>(c, "OrganizationId") != Guid.Empty);
+
+        modelBuilder.Entity<BrownfieldJob>()
+            .HasQueryFilter(j => CurrentOrganizationId == null || j.OrganizationId == CurrentOrganizationId);
+        modelBuilder.Entity<CursorCredential>()
+            .HasQueryFilter(c => CurrentOrganizationId == null || c.OrganizationId == CurrentOrganizationId);
+        modelBuilder.Entity<GitHubConnection>()
+            .HasQueryFilter(g => CurrentOrganizationId == null || g.OrganizationId == CurrentOrganizationId);
+        modelBuilder.Entity<JiraConnection>()
+            .HasQueryFilter(j => CurrentOrganizationId == null || j.OrganizationId == CurrentOrganizationId);
+        modelBuilder.Entity<ConfluenceConnection>()
+            .HasQueryFilter(c => CurrentOrganizationId == null || c.OrganizationId == CurrentOrganizationId);
     }
 }

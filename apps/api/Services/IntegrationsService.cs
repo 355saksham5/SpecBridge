@@ -2,6 +2,7 @@ using Azure.Security.KeyVault.Secrets;
 using FluentValidation;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using System.Text.Json;
 using SpecBridge.Api.Contracts;
 using SpecBridge.Api.Data;
 using SpecBridge.Api.Data.Entities;
@@ -17,12 +18,15 @@ public sealed class IntegrationsService
     private readonly IValidator<InstallGitHubRequest> _githubValidator;
     private readonly IValidator<ConnectAtlassianRequest> _atlassianValidator;
 
+    private readonly AtlassianOAuthService _atlassianOAuth;
+
     public IntegrationsService(
         SpecBridgeDbContext db,
         TenantContext tenantContext,
         IValidator<PutCursorCredentialRequest> cursorValidator,
         IValidator<InstallGitHubRequest> githubValidator,
         IValidator<ConnectAtlassianRequest> atlassianValidator,
+        AtlassianOAuthService atlassianOAuth,
         IServiceProvider serviceProvider)
     {
         _db = db;
@@ -30,6 +34,7 @@ public sealed class IntegrationsService
         _cursorValidator = cursorValidator;
         _githubValidator = githubValidator;
         _atlassianValidator = atlassianValidator;
+        _atlassianOAuth = atlassianOAuth;
         _secretClient = serviceProvider.GetService<SecretClient>();
     }
 
@@ -172,14 +177,14 @@ public sealed class IntegrationsService
         ConnectAtlassianRequest request,
         CancellationToken cancellationToken = default)
     {
-        return await ConnectAtlassianAsync<JiraConnection>(
+        return await ConnectAtlassianAsync(
             request,
-            baseUrl => new JiraConnection
+            (organizationId, connectionId, baseUrl, secretName) => new JiraConnection
             {
-                Id = Guid.NewGuid(),
-                OrganizationId = baseUrl.organizationId,
-                BaseUrl = baseUrl.url,
-                KeyVaultSecretName = baseUrl.secretName,
+                Id = connectionId,
+                OrganizationId = organizationId,
+                BaseUrl = baseUrl,
+                KeyVaultSecretName = secretName,
                 CreatedAt = DateTime.UtcNow,
             },
             cancellationToken);
@@ -189,14 +194,14 @@ public sealed class IntegrationsService
         ConnectAtlassianRequest request,
         CancellationToken cancellationToken = default)
     {
-        return await ConnectAtlassianAsync<ConfluenceConnection>(
+        return await ConnectAtlassianAsync(
             request,
-            baseUrl => new ConfluenceConnection
+            (organizationId, connectionId, baseUrl, secretName) => new ConfluenceConnection
             {
-                Id = Guid.NewGuid(),
-                OrganizationId = baseUrl.organizationId,
-                BaseUrl = baseUrl.url,
-                KeyVaultSecretName = baseUrl.secretName,
+                Id = connectionId,
+                OrganizationId = organizationId,
+                BaseUrl = baseUrl,
+                KeyVaultSecretName = secretName,
                 CreatedAt = DateTime.UtcNow,
             },
             cancellationToken);
@@ -204,7 +209,7 @@ public sealed class IntegrationsService
 
     private async Task<(TConnection? Connection, IReadOnlyDictionary<string, string[]>? Errors, int StatusCode, string? Detail)> ConnectAtlassianAsync<TConnection>(
         ConnectAtlassianRequest request,
-        Func<(Guid organizationId, string url, string secretName), TConnection> factory,
+        Func<(Guid organizationId, Guid connectionId, string url, string secretName), TConnection> factory,
         CancellationToken cancellationToken) where TConnection : class
     {
         if (!_tenantContext.TryGetOrganizationId(out var organizationId))
@@ -224,15 +229,37 @@ public sealed class IntegrationsService
                 "Key Vault is not configured — OAuth tokens cannot be stored.");
         }
 
+        if (!_atlassianOAuth.IsConfigured)
+        {
+            return (null, null, StatusCodes.Status503ServiceUnavailable,
+                "Atlassian OAuth is not configured — set ClientId, ClientSecret (env only), and Key Vault.");
+        }
+
+        var (tokenBundle, oauthError) = await _atlassianOAuth.ExchangeAuthorizationCodeAsync(
+            request.Code.Trim(),
+            request.RedirectUri.Trim(),
+            cancellationToken);
+
+        if (tokenBundle is null)
+        {
+            return (null, new Dictionary<string, string[]>
+            {
+                ["code"] = [oauthError ?? "Atlassian OAuth code exchange failed."],
+            }, StatusCodes.Status400BadRequest, null);
+        }
+
         var connectionId = Guid.NewGuid();
         var secretName = $"atlassian-{typeof(TConnection).Name.ToLowerInvariant()}-{organizationId:N}-{connectionId:N}";
-        await _secretClient.SetSecretAsync(secretName, request.Code, cancellationToken);
+        await _secretClient.SetSecretAsync(
+            secretName,
+            JsonSerializer.Serialize(tokenBundle),
+            cancellationToken);
 
         var baseUrl = string.IsNullOrWhiteSpace(request.BaseUrl)
             ? "https://atlassian.net"
             : request.BaseUrl.Trim().TrimEnd('/');
 
-        var entity = factory((organizationId, baseUrl, secretName));
+        var entity = factory((organizationId, connectionId, baseUrl, secretName));
 
         if (entity is JiraConnection jira)
         {
