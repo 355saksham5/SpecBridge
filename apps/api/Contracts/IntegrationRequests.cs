@@ -12,6 +12,7 @@ public sealed class InstallGitHubRequest
     public string WebUrl { get; set; } = string.Empty;
     public string? ApiBaseUrl { get; set; }
     public string HostType { get; set; } = "github.com";
+    public string? InstallationToken { get; set; }
 }
 
 public sealed class ConnectAtlassianRequest

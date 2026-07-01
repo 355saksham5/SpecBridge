@@ -7,8 +7,7 @@ namespace SpecBridge.Api.Services;
 public sealed record JobEvent(string EventType, string DataJson, DateTimeOffset Timestamp);
 
 /// <summary>
-/// In-process pub/sub for job SSE streams. Workers fan in via the internal events endpoint.
-/// Buffers recent events for late-connecting clients; terminal on job_completed / job_failed.
+/// In-process pub/sub for job SSE streams with PostgreSQL replay on subscribe.
 /// </summary>
 public sealed class JobEventHub
 {
@@ -20,6 +19,12 @@ public sealed class JobEventHub
     };
 
     private readonly ConcurrentDictionary<Guid, JobEventState> _jobs = new();
+    private readonly IServiceScopeFactory _scopeFactory;
+
+    public JobEventHub(IServiceScopeFactory scopeFactory)
+    {
+        _scopeFactory = scopeFactory;
+    }
 
     public JobEvent Publish(Guid jobId, string eventType, object data)
     {
@@ -46,19 +51,6 @@ public sealed class JobEventHub
         return jobEvent;
     }
 
-    public IReadOnlyList<JobEvent> GetHistory(Guid jobId)
-    {
-        if (!_jobs.TryGetValue(jobId, out var state))
-        {
-            return Array.Empty<JobEvent>();
-        }
-
-        lock (state.Sync)
-        {
-            return state.History.ToArray();
-        }
-    }
-
     public bool IsTerminal(Guid jobId)
     {
         return _jobs.TryGetValue(jobId, out var state) && state.IsTerminal;
@@ -68,18 +60,39 @@ public sealed class JobEventHub
         Guid jobId,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
     {
+        var replay = await LoadReplayAsync(jobId, cancellationToken);
         var state = _jobs.GetOrAdd(jobId, _ => new JobEventState());
-        List<JobEvent> snapshot;
+        var seen = new HashSet<string>(StringComparer.Ordinal);
 
+        foreach (var jobEvent in replay)
+        {
+            if (!seen.Add(EventKey(jobEvent)))
+            {
+                continue;
+            }
+
+            yield return jobEvent;
+            if (TerminalEvents.Contains(jobEvent.EventType))
+            {
+                yield break;
+            }
+        }
+
+        List<JobEvent> snapshot;
         lock (state.Sync)
         {
             snapshot = state.History.ToList();
         }
 
-        foreach (var existing in snapshot)
+        foreach (var jobEvent in snapshot)
         {
-            yield return existing;
-            if (TerminalEvents.Contains(existing.EventType))
+            if (!seen.Add(EventKey(jobEvent)))
+            {
+                continue;
+            }
+
+            yield return jobEvent;
+            if (TerminalEvents.Contains(jobEvent.EventType))
             {
                 yield break;
             }
@@ -99,6 +112,16 @@ public sealed class JobEventHub
             }
         }
     }
+
+    private async Task<IReadOnlyList<JobEvent>> LoadReplayAsync(Guid jobId, CancellationToken cancellationToken)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var writer = scope.ServiceProvider.GetRequiredService<JobProgressWriter>();
+        return await writer.LoadEventsAsync(jobId, cancellationToken);
+    }
+
+    private static string EventKey(JobEvent jobEvent) =>
+        $"{jobEvent.EventType}|{jobEvent.Timestamp.UtcTicks}|{jobEvent.DataJson.Length}";
 
     private sealed class JobEventState
     {

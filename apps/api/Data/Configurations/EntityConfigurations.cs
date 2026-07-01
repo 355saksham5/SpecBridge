@@ -43,6 +43,19 @@ public sealed class GitHubConnectionConfiguration : IEntityTypeConfiguration<Git
         builder.Property(g => g.HostType).HasMaxLength(32).IsRequired();
         builder.Property(g => g.WebUrl).HasMaxLength(2048).IsRequired();
         builder.Property(g => g.ApiBaseUrl).HasMaxLength(2048).IsRequired();
+        builder.Property(g => g.KeyVaultSecretName).HasMaxLength(256);
+    }
+}
+
+public sealed class JobEventRecordConfiguration : IEntityTypeConfiguration<JobEventRecord>
+{
+    public void Configure(EntityTypeBuilder<JobEventRecord> builder)
+    {
+        builder.ToTable("job_events");
+        builder.HasKey(e => e.Id);
+        builder.Property(e => e.EventType).HasMaxLength(64).IsRequired();
+        builder.Property(e => e.DataJson).HasMaxLength(32768).IsRequired();
+        builder.HasIndex(e => new { e.BrownfieldJobId, e.CreatedAt });
     }
 }
 

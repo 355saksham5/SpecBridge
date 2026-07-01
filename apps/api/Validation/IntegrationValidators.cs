@@ -41,6 +41,10 @@ public sealed class InstallGitHubRequestValidator : AbstractValidator<InstallGit
         RuleFor(x => x.HostType)
             .Must(h => h is "github.com" or "ghes")
             .WithMessage("hostType must be github.com or ghes");
+
+        RuleFor(x => x.InstallationToken)
+            .MaximumLength(4096)
+            .When(x => !string.IsNullOrEmpty(x.InstallationToken));
     }
 }
 

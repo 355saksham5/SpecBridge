@@ -38,9 +38,16 @@
 - ✅ Paginated job list with cursor filters (status, repoUrl)
 - ✅ ProblemDetails + `GlobalExceptionHandler`
 
+**Implemented (Phase 10):**
+- ✅ `POST /v1/internal/worker/resolve-credentials` — KV-backed Cursor/GitHub/Jira secrets by connection ID
+- ✅ Service Bus messages include `credentials`; worker `credential-resolver.ts`
+- ✅ `job_events`, `job_commits`, `job_phase_runs` persisted from worker SSE fan-in
+- ✅ SSE replay loads from PostgreSQL on subscribe (survives API restart)
+- ✅ E2E recorded job flow test (`tests/e2e-recorded-job-flow.test.ts`)
+
 **Pending:**
-- ⏳ Full Atlassian OAuth token exchange (connect endpoints store auth code in KV today)
-- ⏳ Azure Blob upload from API for jobs without worker blob config
+- ⏳ Full Atlassian OAuth token exchange (connect still stores auth code in KV)
+- ⏳ Duplicate job (409) and cancel conflict (409) per OpenAPI
 
 ## Running Locally
 

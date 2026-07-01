@@ -51,6 +51,8 @@ builder.Services.AddSingleton<SddKitRegistry>();
 builder.Services.AddScoped<TenantContext>();
 builder.Services.AddScoped<BrownfieldJobService>();
 builder.Services.AddScoped<IntegrationsService>();
+builder.Services.AddScoped<WorkerCredentialService>();
+builder.Services.AddScoped<JobProgressWriter>();
 builder.Services.AddHttpClient();
 
 builder.Services.AddProblemDetails(options =>
@@ -143,7 +145,7 @@ app.MapGet("/health", () => Results.Ok(new
 {
     status = "healthy",
     timestamp = DateTime.UtcNow,
-    version = "1.0.0-phase9"
+    version = "1.0.0-phase10"
 }))
 .AllowAnonymous()
 .WithName("GetHealth")
@@ -426,6 +428,37 @@ app.MapPost("/v1/internal/brownfield-jobs/{id:guid}/events", async (
 })
 .AllowAnonymous()
 .WithName("PublishBrownfieldJobEvent")
+.WithTags("Internal");
+
+app.MapPost("/v1/internal/worker/resolve-credentials", async (
+    ResolveWorkerCredentialsRequest request,
+    WorkerCredentialService credentials,
+    InternalEventsAuth auth,
+    HttpContext http,
+    CancellationToken cancellationToken) =>
+{
+    if (!auth.IsConfigured)
+    {
+        return Results.Json(
+            new { title = "Not configured", detail = "Internal worker API is disabled — set Internal:EventsApiKey." },
+            statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
+
+    if (!auth.TryValidate(http.Request.Headers["X-SpecBridge-Events-Key"]))
+    {
+        return Results.Unauthorized();
+    }
+
+    var (resolved, statusCode, detail) = await credentials.ResolveAsync(request, cancellationToken);
+    if (resolved is null)
+    {
+        return Results.Json(new { title = "Rejected", detail }, statusCode: statusCode);
+    }
+
+    return Results.Ok(resolved);
+})
+.AllowAnonymous()
+.WithName("ResolveWorkerCredentials")
 .WithTags("Internal");
 
 app.MapPost("/v1/brownfield-jobs/{id:guid}/cancel", async (

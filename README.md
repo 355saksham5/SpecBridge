@@ -51,7 +51,7 @@ specbridge/
 
 This project follows **Specs-Driven Design** using the `csharp-sdd-starter-kit`. See [USAGE_GUIDE.md](./USAGE_GUIDE.md) for the complete workflow.
 
-**Current Phase**: Phase 9 complete — EF migrations, blob SAS bundle delivery, integrations + SDD kit endpoints, ProblemDetails.
+**Current Phase**: Phase 10 — worker credential wiring, DB job progress, E2E recorded job flow.
 
 **Implemented (Phase 9):**
 - ✅ EF Core `InitialCreate` migration + auto-apply on startup (graceful skip if DB unavailable)

@@ -6,12 +6,19 @@ import { tmpdir } from "node:os";
 import { runBrownfieldJob, type BrownfieldJobOptions } from "./job-pipeline.js";
 import { createTracingEmit } from "./telemetry.js";
 import { createApiEventRelay, resolveEventRelayOptions } from "./event-relay.js";
+import {
+  applyResolvedCredentials,
+  resolveCredentialResolverOptions,
+  resolveWorkerCredentials,
+  type WorkerJobCredentials,
+} from "./credential-resolver.js";
 
 const WORKER_REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 
 export type JobMessage = {
   jobId: string;
   organizationId?: string;
+  credentials?: WorkerJobCredentials;
   options: Omit<BrownfieldJobOptions, "jobId" | "onEvent">;
 };
 
@@ -56,6 +63,23 @@ export async function startServiceBusConsumer(options: ServiceBusConsumerOptions
 
     console.log(`# Processing job ${body.jobId}`);
 
+    const credentialOpts = resolveCredentialResolverOptions(body.organizationId, body.credentials);
+    let resolvedCredentials = null;
+    if (credentialOpts) {
+      try {
+        resolvedCredentials = await resolveWorkerCredentials(credentialOpts);
+      } catch (err) {
+        console.warn(
+          `# Credential resolve failed for job ${body.jobId}:`,
+          err instanceof Error ? err.message : err,
+        );
+      }
+    }
+
+    const applied = applyResolvedCredentials(resolvedCredentials);
+    const useMock =
+      body.options.mockAgents ?? (!applied.cursorApiKey && !process.env.CURSOR_API_KEY);
+
     try {
       await runBrownfieldJob({
         ...body.options,
@@ -65,7 +89,18 @@ export async function startServiceBusConsumer(options: ServiceBusConsumerOptions
         outputDir,
         branch: body.options.branch ?? "main",
         headSha: body.options.headSha ?? "HEAD",
-        mockAgents: body.options.mockAgents ?? !process.env.CURSOR_API_KEY,
+        cursorApiKey: applied.cursorApiKey,
+        jira: applied.jira ?? body.options.jira,
+        mockAgents: useMock,
+        recordedAgents: body.options.recordedAgents ?? useMock,
+        delivery: body.options.delivery
+          ? {
+              ...body.options.delivery,
+              github: applied.github ?? body.options.delivery.github,
+            }
+          : applied.github
+            ? { openPr: false, github: applied.github }
+            : undefined,
         onEvent,
       });
       await receiver.completeMessage(message);
@@ -90,7 +125,6 @@ export async function startServiceBusConsumer(options: ServiceBusConsumerOptions
     },
   });
 
-  // Keep process alive until externally terminated.
   await new Promise<void>(() => undefined);
 }
 

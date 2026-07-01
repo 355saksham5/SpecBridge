@@ -31,6 +31,7 @@ public sealed class BrownfieldJobService
     private readonly JobArtifactStore _artifactStore;
     private readonly BundleStorageService _bundleStorage;
     private readonly IValidator<ListJobsQuery> _listQueryValidator;
+    private readonly JobProgressWriter _progressWriter;
 
     public BrownfieldJobService(
         SpecBridgeDbContext db,
@@ -40,7 +41,8 @@ public sealed class BrownfieldJobService
         JobEventHub eventHub,
         JobArtifactStore artifactStore,
         BundleStorageService bundleStorage,
-        IValidator<ListJobsQuery> listQueryValidator)
+        IValidator<ListJobsQuery> listQueryValidator,
+        JobProgressWriter progressWriter)
     {
         _db = db;
         _queue = queue;
@@ -50,6 +52,7 @@ public sealed class BrownfieldJobService
         _artifactStore = artifactStore;
         _bundleStorage = bundleStorage;
         _listQueryValidator = listQueryValidator;
+        _progressWriter = progressWriter;
     }
 
     public async Task<(BrownfieldJob? Job, IReadOnlyDictionary<string, string[]>? Errors, int StatusCode, string? Detail)> CreateAsync(
@@ -249,6 +252,7 @@ public sealed class BrownfieldJobService
         var published = _eventHub.Publish(jobId, request.EventType, payload);
         _artifactStore.RecordEvent(jobId, request.EventType, published.DataJson);
         await ApplyEventToJobAsync(job, request.EventType, payload, cancellationToken);
+        await _progressWriter.PersistEventAsync(jobId, request.EventType, published.DataJson, payload, cancellationToken);
 
         return (true, StatusCodes.Status202Accepted, null);
     }
@@ -578,6 +582,12 @@ public sealed class BrownfieldJobService
         {
             jobId,
             organizationId,
+            credentials = new WorkerJobCredentials
+            {
+                CursorCredentialId = request.CursorCredentialId,
+                GitHubConnectionId = request.GitHubConnectionId,
+                JiraConnectionId = jira?.ConnectionId,
+            },
             options = new
             {
                 repoUrl = request.RepoUrl.Trim(),

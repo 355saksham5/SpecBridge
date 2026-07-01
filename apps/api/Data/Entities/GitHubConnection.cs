@@ -11,5 +11,6 @@ public class GitHubConnection
     public required string WebUrl { get; set; }
     public required string ApiBaseUrl { get; set; }
     public long InstallationId { get; set; }
+    public string? KeyVaultSecretName { get; set; }
     public DateTime CreatedAt { get; set; }
 }

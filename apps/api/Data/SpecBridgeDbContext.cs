@@ -19,6 +19,7 @@ public class SpecBridgeDbContext : DbContext
     public DbSet<BrownfieldJob> BrownfieldJobs => Set<BrownfieldJob>();
     public DbSet<JobCommit> JobCommits => Set<JobCommit>();
     public DbSet<JobPhaseRun> JobPhaseRuns => Set<JobPhaseRun>();
+    public DbSet<JobEventRecord> JobEvents => Set<JobEventRecord>();
     public DbSet<Organization> Organizations => Set<Organization>();
     public DbSet<CursorCredential> CursorCredentials => Set<CursorCredential>();
     public DbSet<GitHubConnection> GitHubConnections => Set<GitHubConnection>();

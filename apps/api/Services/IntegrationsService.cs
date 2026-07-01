@@ -124,14 +124,23 @@ public sealed class IntegrationsService
             ? (request.HostType == "ghes" ? $"{webUrl}/api/v3" : "https://api.github.com")
             : request.ApiBaseUrl.Trim();
 
+        var connectionId = Guid.NewGuid();
+        string? keyVaultSecretName = null;
+        if (!string.IsNullOrWhiteSpace(request.InstallationToken) && _secretClient is not null)
+        {
+            keyVaultSecretName = $"github-token-{organizationId:N}-{connectionId:N}";
+            await _secretClient.SetSecretAsync(keyVaultSecretName, request.InstallationToken, cancellationToken);
+        }
+
         var connection = new GitHubConnection
         {
-            Id = Guid.NewGuid(),
+            Id = connectionId,
             OrganizationId = organizationId,
             HostType = request.HostType,
             WebUrl = webUrl,
             ApiBaseUrl = apiBaseUrl,
             InstallationId = request.InstallationId,
+            KeyVaultSecretName = keyVaultSecretName,
             CreatedAt = DateTime.UtcNow,
         };
 
