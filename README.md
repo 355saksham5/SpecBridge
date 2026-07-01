@@ -51,7 +51,15 @@ specbridge/
 
 This project follows **Specs-Driven Design** using the `csharp-sdd-starter-kit`. See [USAGE_GUIDE.md](./USAGE_GUIDE.md) for the complete workflow.
 
-**Current Phase**: Phase 7 — API job contract (FluentValidation DTOs, tenant credential checks, GET job by id). Phases 0–6 implementation complete.
+**Current Phase**: Phase 8 complete — SSE job events stream, bundle/report endpoints, worker event relay to API.
+
+**Implemented (Phase 8):**
+- ✅ `GET /v1/brownfield-jobs/{id}/events` — SSE with replay + live subscription
+- ✅ `GET /v1/brownfield-jobs/{id}/bundle` — 302 redirect to bundle URL from `bundle_ready`
+- ✅ `GET /v1/brownfield-jobs/{id}/report` — quality report from `job_completed` metrics
+- ✅ Internal worker fan-in: `POST /v1/internal/brownfield-jobs/{id}/events` (API key)
+- ✅ Worker `event-relay.ts` when `SPECBRIDGE_API_BASE_URL` + `SPECBRIDGE_EVENTS_API_KEY` set
+- ✅ EventSource `?token=` middleware for browser SSE clients
 
 ## License
 

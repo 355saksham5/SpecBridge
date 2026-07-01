@@ -26,10 +26,16 @@
 - ✅ `GET /v1/brownfield-jobs/{id}` with tenant isolation
 - ✅ EF entity configurations (ready for `dotnet ef migrations add Initial`)
 
+**Implemented (Phase 8):**
+- ✅ SSE stream at `GET /v1/brownfield-jobs/{id}/events` (`text/event-stream`, event replay)
+- ✅ `GET /v1/brownfield-jobs/{id}/bundle` — 302 to bundle URL captured from `bundle_ready`
+- ✅ `GET /v1/brownfield-jobs/{id}/report` — quality metrics from `job_completed`
+- ✅ Internal events fan-in for knowledge-worker (`Internal:EventsApiKey`)
+- ✅ EventSource `?token=` query support for browser clients
+
 **Pending:**
 - ⏳ EF Core migrations (`dotnet ef migrations add Initial`)
-- ⏳ SSE endpoint (`/v1/brownfield-jobs/{id}/events`)
-- ⏳ Bundle/report download endpoints
+- ⏳ Azure Blob SAS generation for bundle downloads (local path today from worker)
 - ⏳ ProblemDetails middleware
 
 ## Running Locally

@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { runBrownfieldJob, type BrownfieldJobOptions } from "./job-pipeline.js";
 import { createTracingEmit } from "./telemetry.js";
+import { createApiEventRelay, resolveEventRelayOptions } from "./event-relay.js";
 
 const WORKER_REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 
@@ -45,10 +46,13 @@ export async function startServiceBusConsumer(options: ServiceBusConsumerOptions
     const repoPath = body.options.repoPath ?? process.env.SPECBRIDGE_REPO_PATH ?? WORKER_REPO_ROOT;
     await mkdir(outputDir, { recursive: true });
 
-    const onEvent = createTracingEmit(options.onEvent, {
-      jobId: body.jobId,
-      organizationId: body.organizationId,
-    });
+    const onEvent = createTracingEmit(
+      wrapWithEventRelay(options.onEvent, body.jobId),
+      {
+        jobId: body.jobId,
+        organizationId: body.organizationId,
+      },
+    );
 
     console.log(`# Processing job ${body.jobId}`);
 
@@ -87,4 +91,13 @@ export async function startServiceBusConsumer(options: ServiceBusConsumerOptions
 
   // Keep process alive until externally terminated.
   await new Promise<void>(() => undefined);
+}
+
+function wrapWithEventRelay(base: BrownfieldJobOptions["onEvent"], jobId: string): BrownfieldJobOptions["onEvent"] {
+  const relayOptions = resolveEventRelayOptions(jobId);
+  if (!relayOptions) {
+    return base;
+  }
+
+  return createApiEventRelay(base, relayOptions);
 }

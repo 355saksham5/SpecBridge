@@ -42,6 +42,9 @@ builder.Services.AddSingleton<GhesHostRegistry>();
 builder.Services.AddSingleton<JobCancellationRegistry>();
 builder.Services.AddSingleton<BrownfieldJobQueue>();
 builder.Services.AddSingleton<RepoPreflightService>();
+builder.Services.AddSingleton<JobEventHub>();
+builder.Services.AddSingleton<JobArtifactStore>();
+builder.Services.AddSingleton<InternalEventsAuth>();
 builder.Services.AddScoped<TenantContext>();
 builder.Services.AddScoped<BrownfieldJobService>();
 builder.Services.AddHttpClient();
@@ -83,6 +86,7 @@ if (app.Environment.IsDevelopment())
     app.UseCors();
 }
 
+app.UseMiddleware<EventSourceTokenMiddleware>();
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseMiddleware<OrgRateLimitMiddleware>();
@@ -91,7 +95,7 @@ app.MapGet("/health", () => Results.Ok(new
 {
     status = "healthy",
     timestamp = DateTime.UtcNow,
-    version = "1.0.0-phase7"
+    version = "1.0.0-phase8"
 }))
 .AllowAnonymous()
 .WithName("GetHealth")
@@ -232,6 +236,118 @@ app.MapGet("/v1/brownfield-jobs/{id:guid}", async (
 .RequireAuthorization()
 .WithName("GetBrownfieldJob")
 .WithTags("Brownfield Jobs");
+
+app.MapGet("/v1/brownfield-jobs/{id:guid}/events", async (
+    Guid id,
+    BrownfieldJobService jobs,
+    JobEventHub hub,
+    HttpContext http,
+    CancellationToken cancellationToken) =>
+{
+    var (job, statusCode) = await jobs.GetByIdAsync(id, cancellationToken);
+    if (job is null)
+    {
+        http.Response.StatusCode = statusCode;
+        await http.Response.WriteAsJsonAsync(new
+        {
+            title = statusCode == StatusCodes.Status403Forbidden ? "Forbidden" : "Not found",
+            detail = statusCode == StatusCodes.Status403Forbidden
+                ? "Missing org_id claim on authenticated principal."
+                : $"No job with id '{id}' for this organization.",
+        }, cancellationToken);
+        return;
+    }
+
+    http.Response.StatusCode = StatusCodes.Status200OK;
+    http.Response.Headers.CacheControl = "no-cache";
+    http.Response.ContentType = "text/event-stream";
+
+    await foreach (var jobEvent in hub.SubscribeAsync(id, cancellationToken))
+    {
+        await http.Response.WriteAsync(SseFormatter.Format(jobEvent.EventType, jobEvent.DataJson), cancellationToken);
+        await http.Response.Body.FlushAsync(cancellationToken);
+    }
+})
+.RequireAuthorization()
+.WithName("GetBrownfieldJobEvents")
+.WithTags("Brownfield Jobs");
+
+app.MapGet("/v1/brownfield-jobs/{id:guid}/bundle", async (
+    Guid id,
+    BrownfieldJobService jobs,
+    CancellationToken cancellationToken) =>
+{
+    var (redirectUrl, statusCode, detail) = await jobs.GetBundleRedirectAsync(id, cancellationToken);
+
+    if (redirectUrl is not null)
+    {
+        return Results.Redirect(redirectUrl, permanent: false);
+    }
+
+    return statusCode switch
+    {
+        StatusCodes.Status403Forbidden => Results.Json(new { title = "Forbidden", detail }, statusCode: statusCode),
+        StatusCodes.Status409Conflict => Results.Json(new { title = "Conflict", detail }, statusCode: statusCode),
+        _ => Results.NotFound(new { title = "Not found", detail }),
+    };
+})
+.RequireAuthorization()
+.WithName("GetBrownfieldJobBundle")
+.WithTags("Brownfield Jobs");
+
+app.MapGet("/v1/brownfield-jobs/{id:guid}/report", async (
+    Guid id,
+    BrownfieldJobService jobs,
+    CancellationToken cancellationToken) =>
+{
+    var (report, statusCode, detail) = await jobs.GetReportAsync(id, cancellationToken);
+
+    if (report is not null)
+    {
+        return Results.Ok(report);
+    }
+
+    return statusCode switch
+    {
+        StatusCodes.Status403Forbidden => Results.Json(new { title = "Forbidden", detail }, statusCode: statusCode),
+        _ => Results.NotFound(new { title = "Not found", detail }),
+    };
+})
+.RequireAuthorization()
+.WithName("GetBrownfieldJobReport")
+.WithTags("Brownfield Jobs");
+
+app.MapPost("/v1/internal/brownfield-jobs/{id:guid}/events", async (
+    Guid id,
+    PublishJobEventRequest request,
+    BrownfieldJobService jobs,
+    InternalEventsAuth auth,
+    HttpContext http,
+    CancellationToken cancellationToken) =>
+{
+    if (!auth.IsConfigured)
+    {
+        return Results.Json(
+            new { title = "Not configured", detail = "Internal events endpoint is disabled — set Internal:EventsApiKey." },
+            statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
+
+    if (!auth.TryValidate(http.Request.Headers["X-SpecBridge-Events-Key"]))
+    {
+        return Results.Unauthorized();
+    }
+
+    var (accepted, statusCode, detail) = await jobs.PublishWorkerEventAsync(id, request, cancellationToken);
+    if (!accepted)
+    {
+        return Results.Json(new { title = "Rejected", detail }, statusCode: statusCode);
+    }
+
+    return Results.Accepted($"/v1/brownfield-jobs/{id}/events", new { jobId = id, eventType = request.EventType });
+})
+.AllowAnonymous()
+.WithName("PublishBrownfieldJobEvent")
+.WithTags("Internal");
 
 app.MapPost("/v1/brownfield-jobs/{id:guid}/cancel", async (
     Guid id,
