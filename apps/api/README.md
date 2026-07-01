@@ -27,16 +27,20 @@
 - ✅ EF entity configurations (ready for `dotnet ef migrations add Initial`)
 
 **Implemented (Phase 8):**
-- ✅ SSE stream at `GET /v1/brownfield-jobs/{id}/events` (`text/event-stream`, event replay)
-- ✅ `GET /v1/brownfield-jobs/{id}/bundle` — 302 to bundle URL captured from `bundle_ready`
-- ✅ `GET /v1/brownfield-jobs/{id}/report` — quality metrics from `job_completed`
-- ✅ Internal events fan-in for knowledge-worker (`Internal:EventsApiKey`)
-- ✅ EventSource `?token=` query support for browser clients
+- ✅ SSE stream, bundle/report endpoints, worker event relay
+
+**Implemented (Phase 9):**
+- ✅ EF Core `InitialCreate` migration (`Data/Migrations/`) + SQL script fallback
+- ✅ `BundleStorageService` — 30-min read SAS URLs for bundle ZIPs
+- ✅ Worker `blob-upload.ts` — uploads bundle when `SPECBRIDGE_BLOB_CONNECTION_STRING` set
+- ✅ Integration endpoints: Cursor, GitHub install/list, Jira/Confluence OAuth connect
+- ✅ SDD kit registry: `GET /v1/sdd-kits`, `GET /v1/sdd-kits/{kitId}`
+- ✅ Paginated job list with cursor filters (status, repoUrl)
+- ✅ ProblemDetails + `GlobalExceptionHandler`
 
 **Pending:**
-- ⏳ EF Core migrations (`dotnet ef migrations add Initial`)
-- ⏳ Azure Blob SAS generation for bundle downloads (local path today from worker)
-- ⏳ ProblemDetails middleware
+- ⏳ Full Atlassian OAuth token exchange (connect endpoints store auth code in KV today)
+- ⏳ Azure Blob upload from API for jobs without worker blob config
 
 ## Running Locally
 

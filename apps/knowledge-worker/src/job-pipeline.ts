@@ -4,6 +4,7 @@ import { getHeadSha, type WalkOrder, type JiraExtractSource } from "@specbridge/
 import { bootstrapKnowledgeAtHead, emit, type BootstrapJobOptions } from "./bootstrap-pipeline.js";
 import { runCommitWalkPhase, type JiraEnrichmentOptions, type ValidationOptions } from "./commit-walk-pipeline.js";
 import { openOnboardingPullRequest, type GitHubDeliveryOptions } from "./pr-delivery.js";
+import { resolveBlobUploadConfig, uploadBundleBlob } from "./blob-upload.js";
 
 const FULL_SHA_PATTERN = /^[0-9a-f]{40}$/;
 
@@ -16,6 +17,7 @@ export type DeliveryOptions = {
 };
 
 export type BrownfieldJobOptions = BootstrapJobOptions & {
+  organizationId?: string;
   walkOrder?: WalkOrder;
   issueKeyPattern?: string;
   extractFrom?: JiraExtractSource[];
@@ -95,8 +97,19 @@ export async function runBrownfieldJob(options: BrownfieldJobOptions): Promise<B
     },
   });
 
+  const blobConfig = resolveBlobUploadConfig(options.organizationId, options.jobId);
+  let bundleBlobName: string | undefined;
+  if (blobConfig) {
+    const uploaded = await uploadBundleBlob({
+      ...blobConfig,
+      localZipPath: zipPath,
+    });
+    bundleBlobName = uploaded?.blobName;
+  }
+
   emit(options.onEvent, "bundle_ready", {
-    bundleUrl: zipPath,
+    bundleUrl: bundleBlobName ? undefined : zipPath,
+    bundleBlobName,
     sizeMb: Math.round((sizeBytes / (1024 * 1024)) * 10) / 10,
     jobId: options.jobId,
   });

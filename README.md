@@ -51,15 +51,15 @@ specbridge/
 
 This project follows **Specs-Driven Design** using the `csharp-sdd-starter-kit`. See [USAGE_GUIDE.md](./USAGE_GUIDE.md) for the complete workflow.
 
-**Current Phase**: Phase 8 complete — SSE job events stream, bundle/report endpoints, worker event relay to API.
+**Current Phase**: Phase 9 complete — EF migrations, blob SAS bundle delivery, integrations + SDD kit endpoints, ProblemDetails.
 
-**Implemented (Phase 8):**
-- ✅ `GET /v1/brownfield-jobs/{id}/events` — SSE with replay + live subscription
-- ✅ `GET /v1/brownfield-jobs/{id}/bundle` — 302 redirect to bundle URL from `bundle_ready`
-- ✅ `GET /v1/brownfield-jobs/{id}/report` — quality report from `job_completed` metrics
-- ✅ Internal worker fan-in: `POST /v1/internal/brownfield-jobs/{id}/events` (API key)
-- ✅ Worker `event-relay.ts` when `SPECBRIDGE_API_BASE_URL` + `SPECBRIDGE_EVENTS_API_KEY` set
-- ✅ EventSource `?token=` middleware for browser SSE clients
+**Implemented (Phase 9):**
+- ✅ EF Core `InitialCreate` migration + auto-apply on startup (graceful skip if DB unavailable)
+- ✅ Azure Blob upload from worker + 30-min read SAS on `GET /bundle`
+- ✅ Integration endpoints (Cursor, GitHub, Jira, Confluence) with Key Vault secret storage
+- ✅ SDD kit registry endpoints
+- ✅ Paginated `GET /v1/brownfield-jobs` with cursor
+- ✅ ProblemDetails + global exception handler
 
 ## License
 

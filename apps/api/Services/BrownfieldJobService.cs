@@ -29,6 +29,8 @@ public sealed class BrownfieldJobService
     private readonly TenantContext _tenantContext;
     private readonly JobEventHub _eventHub;
     private readonly JobArtifactStore _artifactStore;
+    private readonly BundleStorageService _bundleStorage;
+    private readonly IValidator<ListJobsQuery> _listQueryValidator;
 
     public BrownfieldJobService(
         SpecBridgeDbContext db,
@@ -36,7 +38,9 @@ public sealed class BrownfieldJobService
         IValidator<CreateBrownfieldJobRequest> validator,
         TenantContext tenantContext,
         JobEventHub eventHub,
-        JobArtifactStore artifactStore)
+        JobArtifactStore artifactStore,
+        BundleStorageService bundleStorage,
+        IValidator<ListJobsQuery> listQueryValidator)
     {
         _db = db;
         _queue = queue;
@@ -44,6 +48,8 @@ public sealed class BrownfieldJobService
         _tenantContext = tenantContext;
         _eventHub = eventHub;
         _artifactStore = artifactStore;
+        _bundleStorage = bundleStorage;
+        _listQueryValidator = listQueryValidator;
     }
 
     public async Task<(BrownfieldJob? Job, IReadOnlyDictionary<string, string[]>? Errors, int StatusCode, string? Detail)> CreateAsync(
@@ -150,6 +156,61 @@ public sealed class BrownfieldJobService
         return (job, StatusCodes.Status200OK);
     }
 
+    public async Task<(IReadOnlyList<BrownfieldJob> Jobs, string? NextCursor, IReadOnlyDictionary<string, string[]>? Errors, int StatusCode)> ListAsync(
+        ListJobsQuery query,
+        CancellationToken cancellationToken = default)
+    {
+        if (!_tenantContext.TryGetOrganizationId(out var organizationId))
+        {
+            return (Array.Empty<BrownfieldJob>(), null, null, StatusCodes.Status403Forbidden);
+        }
+
+        var validation = await _listQueryValidator.ValidateAsync(query, cancellationToken);
+        if (!validation.IsValid)
+        {
+            return (Array.Empty<BrownfieldJob>(), null, validation.ToDictionary(), StatusCodes.Status400BadRequest);
+        }
+
+        var dbQuery = _db.BrownfieldJobs
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .Where(j => j.OrganizationId == organizationId);
+
+        if (!string.IsNullOrWhiteSpace(query.Status))
+        {
+            dbQuery = dbQuery.Where(j => j.Status == query.Status);
+        }
+
+        if (!string.IsNullOrWhiteSpace(query.RepoUrl))
+        {
+            var repoFilter = query.RepoUrl.Trim();
+            dbQuery = dbQuery.Where(j => j.RepoUrl == repoFilter);
+        }
+
+        if (TryDecodeCursor(query.Cursor, out var cursor))
+        {
+            dbQuery = dbQuery.Where(j =>
+                j.CreatedAt < cursor!.CreatedAt
+                || (j.CreatedAt == cursor.CreatedAt && j.Id.CompareTo(cursor.Id) < 0));
+        }
+
+        var jobs = await dbQuery
+            .OrderByDescending(j => j.CreatedAt)
+            .ThenByDescending(j => j.Id)
+            .Take(query.Limit + 1)
+            .ToListAsync(cancellationToken);
+
+        string? nextCursor = null;
+        if (jobs.Count > query.Limit)
+        {
+            var last = jobs[query.Limit - 1];
+            nextCursor = EncodeCursor(last.CreatedAt, last.Id);
+            jobs = jobs.Take(query.Limit).ToList();
+        }
+
+        return (jobs, nextCursor, null, StatusCodes.Status200OK);
+    }
+
     public async Task<(bool Accepted, int StatusCode, string? Detail)> PublishWorkerEventAsync(
         Guid jobId,
         PublishJobEventRequest request,
@@ -205,7 +266,19 @@ public sealed class BrownfieldJobService
         }
 
         var artifacts = _artifactStore.Get(jobId);
-        if (!string.IsNullOrWhiteSpace(artifacts?.BundleUrl))
+        var blobName = job.BundleBlobName ?? artifacts?.BundleBlobName;
+        if (!string.IsNullOrWhiteSpace(blobName))
+        {
+            var sasUrl = await _bundleStorage.CreateReadSasUrlAsync(blobName, cancellationToken);
+            if (!string.IsNullOrWhiteSpace(sasUrl))
+            {
+                return (sasUrl, StatusCodes.Status302Found, null);
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(artifacts?.BundleUrl)
+            && Uri.TryCreate(artifacts.BundleUrl, UriKind.Absolute, out var bundleUri)
+            && (bundleUri.Scheme == Uri.UriSchemeHttps || bundleUri.Scheme == Uri.UriSchemeHttp))
         {
             return (artifacts.BundleUrl, StatusCodes.Status302Found, null);
         }
@@ -285,6 +358,13 @@ public sealed class BrownfieldJobService
 
             case "audit_verdict":
                 job.CommitsProcessed += 1;
+                break;
+
+            case "bundle_ready":
+                if (TryGetString(payload, "bundleBlobName", out var blobName))
+                {
+                    job.BundleBlobName = blobName;
+                }
                 break;
 
             case "job_completed":
@@ -418,6 +498,67 @@ public sealed class BrownfieldJobService
         commitsSkipped = job.CommitsSkipped,
         tokenCurve = Array.Empty<object>(),
     };
+
+    private static bool TryGetString(Dictionary<string, object?> payload, string key, out string? value)
+    {
+        value = null;
+        if (!payload.TryGetValue(key, out var raw) || raw is null)
+        {
+            return false;
+        }
+
+        value = raw switch
+        {
+            string s => s,
+            JsonElement el when el.ValueKind == JsonValueKind.String => el.GetString(),
+            _ => null,
+        };
+
+        return !string.IsNullOrWhiteSpace(value);
+    }
+
+    private static string EncodeCursor(DateTime createdAt, Guid id) =>
+        Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes($"{createdAt:O}|{id}"));
+
+    private static bool TryDecodeCursor(string? cursor, out JobCursor? decoded)
+    {
+        decoded = null;
+        if (string.IsNullOrWhiteSpace(cursor))
+        {
+            return false;
+        }
+
+        try
+        {
+            var text = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(cursor));
+            var separator = text.LastIndexOf('|');
+            if (separator <= 0)
+            {
+                return false;
+            }
+
+            var createdText = text[..separator];
+            var idText = text[(separator + 1)..];
+            if (!DateTime.TryParse(createdText, null, System.Globalization.DateTimeStyles.RoundtripKind, out var createdAt))
+            {
+                return false;
+            }
+
+            if (!Guid.TryParse(idText, out var jobId))
+            {
+                return false;
+            }
+
+            decoded = new JobCursor(createdAt.ToUniversalTime(), jobId);
+            return true;
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+    }
+
+    private sealed record JobCursor(DateTime CreatedAt, Guid Id);
 
     private async Task<BrownfieldJob?> FindJobAsync(Guid jobId, Guid organizationId, CancellationToken cancellationToken) =>
         await _db.BrownfieldJobs

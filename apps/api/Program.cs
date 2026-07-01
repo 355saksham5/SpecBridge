@@ -7,6 +7,7 @@ using Azure.Identity;
 using Azure.Security.KeyVault.Secrets;
 using SpecBridge.Api.Contracts;
 using SpecBridge.Api.Data;
+using SpecBridge.Api.Endpoints;
 using SpecBridge.Api.Middleware;
 using SpecBridge.Api.Services;
 using SpecBridge.Api.Validation;
@@ -45,9 +46,21 @@ builder.Services.AddSingleton<RepoPreflightService>();
 builder.Services.AddSingleton<JobEventHub>();
 builder.Services.AddSingleton<JobArtifactStore>();
 builder.Services.AddSingleton<InternalEventsAuth>();
+builder.Services.AddSingleton<BundleStorageService>();
+builder.Services.AddSingleton<SddKitRegistry>();
 builder.Services.AddScoped<TenantContext>();
 builder.Services.AddScoped<BrownfieldJobService>();
+builder.Services.AddScoped<IntegrationsService>();
 builder.Services.AddHttpClient();
+
+builder.Services.AddProblemDetails(options =>
+{
+    options.CustomizeProblemDetails = context =>
+    {
+        context.ProblemDetails.Instance = context.HttpContext.Request.Path;
+    };
+});
+builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 
 builder.Services.AddFluentValidationAutoValidation();
 builder.Services.AddValidatorsFromAssemblyContaining<Program>();
@@ -79,12 +92,47 @@ if (builder.Environment.IsDevelopment())
 
 var app = builder.Build();
 
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<SpecBridgeDbContext>();
+    try
+    {
+        await db.Database.MigrateAsync();
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "Database migration skipped — ensure PostgreSQL is reachable for persistence.");
+    }
+}
+
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
     app.UseCors();
 }
+
+app.UseExceptionHandler();
+app.UseStatusCodePages(async statusContext =>
+{
+    if (statusContext.HttpContext.Response.HasStarted)
+    {
+        return;
+    }
+
+    var statusCode = statusContext.HttpContext.Response.StatusCode;
+    if (statusCode is StatusCodes.Status401Unauthorized or StatusCodes.Status403Forbidden)
+    {
+        statusContext.HttpContext.Response.ContentType = "application/problem+json";
+        await statusContext.HttpContext.Response.WriteAsJsonAsync(new
+        {
+            type = "https://tools.ietf.org/html/rfc9110#section-15.5",
+            title = statusCode == StatusCodes.Status401Unauthorized ? "Unauthorized" : "Forbidden",
+            status = statusCode,
+            instance = statusContext.HttpContext.Request.Path.Value,
+        });
+    }
+});
 
 app.UseMiddleware<EventSourceTokenMiddleware>();
 app.UseAuthentication();
@@ -95,7 +143,7 @@ app.MapGet("/health", () => Results.Ok(new
 {
     status = "healthy",
     timestamp = DateTime.UtcNow,
-    version = "1.0.0-phase8"
+    version = "1.0.0-phase9"
 }))
 .AllowAnonymous()
 .WithName("GetHealth")
@@ -150,7 +198,38 @@ app.MapGet("/v1/preflight/repo", async (
 .WithName("PreflightRepo")
 .WithTags("Preflight");
 
-app.MapGet("/v1/brownfield-jobs", () => Results.Ok(new { jobs = Array.Empty<object>() }))
+app.MapGet("/v1/brownfield-jobs", async (
+    [AsParameters] ListJobsQuery query,
+    BrownfieldJobService jobs,
+    CancellationToken cancellationToken) =>
+{
+    var (jobList, nextCursor, errors, statusCode) = await jobs.ListAsync(query, cancellationToken);
+
+    if (errors is not null)
+    {
+        return Results.ValidationProblem(errors, statusCode: statusCode);
+    }
+
+    if (statusCode == StatusCodes.Status403Forbidden)
+    {
+        return Results.Json(
+            new { title = "Forbidden", detail = "Missing org_id claim on authenticated principal." },
+            statusCode: statusCode);
+    }
+
+    return Results.Ok(new
+    {
+        jobs = jobList.Select(j => new
+        {
+            jobId = j.Id,
+            status = j.Status,
+            repoUrl = j.RepoUrl,
+            createdAt = j.CreatedAt,
+            updatedAt = j.UpdatedAt,
+        }),
+        nextCursor,
+    });
+})
     .RequireAuthorization()
     .WithName("ListBrownfieldJobs")
     .WithTags("Brownfield Jobs");
@@ -367,5 +446,8 @@ app.MapPost("/v1/brownfield-jobs/{id:guid}/cancel", async (
 .RequireAuthorization()
 .WithName("CancelBrownfieldJob")
 .WithTags("Brownfield Jobs");
+
+app.MapIntegrationEndpoints();
+app.MapSddKitEndpoints();
 
 app.Run();

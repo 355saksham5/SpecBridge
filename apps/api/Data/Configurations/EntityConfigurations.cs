@@ -17,6 +17,7 @@ public sealed class BrownfieldJobConfiguration : IEntityTypeConfiguration<Brownf
         builder.Property(j => j.CurrentAgentRole).HasMaxLength(64);
         builder.Property(j => j.CurrentCommitSha).HasMaxLength(64);
         builder.Property(j => j.PrUrl).HasMaxLength(2048);
+        builder.Property(j => j.BundleBlobName).HasMaxLength(512);
         builder.HasIndex(j => new { j.OrganizationId, j.CreatedAt });
     }
 }

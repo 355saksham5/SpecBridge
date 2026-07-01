@@ -60,6 +60,7 @@ export async function startServiceBusConsumer(options: ServiceBusConsumerOptions
       await runBrownfieldJob({
         ...body.options,
         jobId: body.jobId,
+        organizationId: body.organizationId,
         repoPath,
         outputDir,
         branch: body.options.branch ?? "main",

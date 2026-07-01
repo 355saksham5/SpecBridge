@@ -31,6 +31,11 @@ public sealed class JobArtifactStore
                         artifacts.BundleUrl = urlProp.GetString();
                     }
 
+                    if (root.TryGetProperty("bundleBlobName", out var blobProp) && blobProp.ValueKind == JsonValueKind.String)
+                    {
+                        artifacts.BundleBlobName = blobProp.GetString();
+                    }
+
                     if (root.TryGetProperty("sizeMb", out var sizeProp) && sizeProp.TryGetDouble(out var sizeMb))
                     {
                         artifacts.BundleSizeMb = sizeMb;
@@ -60,6 +65,7 @@ public sealed class JobArtifactStore
 public sealed class JobArtifacts
 {
     public string? BundleUrl { get; set; }
+    public string? BundleBlobName { get; set; }
     public double? BundleSizeMb { get; set; }
     public string? QualityReportJson { get; set; }
     public string? FailureJson { get; set; }

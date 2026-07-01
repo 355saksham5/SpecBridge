@@ -20,6 +20,7 @@ public class BrownfieldJob
     public int? TokenEstimateCurrent { get; set; }
     public float? MeanQaScore { get; set; }
     public string? PrUrl { get; set; }
+    public string? BundleBlobName { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     

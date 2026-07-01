@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@azure/service-bus": "^7.9.5",
+    "@azure/storage-blob": "^12.27.0",
     "@specbridge/audit-log": "*",
     "@specbridge/agent-orchestrator": "*",
     "@specbridge/bundle-packer": "*",
