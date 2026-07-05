@@ -9,6 +9,7 @@ import {
   buildQuestionProberTaskPrompt,
   buildKnowledgeCuratorTaskPrompt,
   buildKnowledgeAuditorTaskPrompt,
+  extractJson,
   HandoffValidator,
   type HandoffArtifactType,
 } from "@specbridge/agent-orchestrator";
@@ -77,7 +78,7 @@ export async function runCalibrationLoop(options: CalibrationLoopOptions): Promi
     recordedMock,
     onEvent: options.onEvent,
   });
-  await calibratorSession.run(
+  const calibratorResult = await calibratorSession.run(
     buildCommitCalibratorTaskPrompt({
       commitSha: options.commitSha,
       retroSpecText: specText,
@@ -88,12 +89,17 @@ export async function runCalibrationLoop(options: CalibrationLoopOptions): Promi
       hallucinatedPaths: metrics.hallucinatedPaths,
     }),
   );
+  // The overlap numbers are always computed deterministically above; the agent only adds
+  // qualitative commentary on top, which we attach rather than discard once it's real.
+  const calibrationReportForHandoff: Record<string, unknown> = options.mock
+    ? calibrationReport
+    : { ...calibrationReport, agentCommentary: calibratorResult.result ?? "" };
   await writeAndHandoff(
     options,
     calibratorSession,
     "calibration-report",
     `${reportsBase}/calibration-report.json`,
-    calibrationReport,
+    calibrationReportForHandoff,
   );
 
   const proberPrompt = await loadAgentPrompt("question-prober");
@@ -106,7 +112,7 @@ export async function runCalibrationLoop(options: CalibrationLoopOptions): Promi
     recordedMock,
     onEvent: options.onEvent,
   });
-  await proberSession.run(
+  const proberResult = await proberSession.run(
     buildQuestionProberTaskPrompt({
       commitSha: options.commitSha,
       overlapPercent: metrics.overlapPercent,
@@ -115,7 +121,9 @@ export async function runCalibrationLoop(options: CalibrationLoopOptions): Promi
       questionCount,
     }),
   );
-  const questions: Question[] = options.mock ? synthesizeMockQuestions(metrics, questionCount) : [];
+  const questions: Question[] = options.mock
+    ? synthesizeMockQuestions(metrics, questionCount)
+    : resolveQuestionsFromAgent(proberResult.result, questionCount);
   await writeAndHandoff(options, proberSession, "questions", `${reportsBase}/questions.json`, {
     commitSha: options.commitSha,
     questions,
@@ -141,7 +149,7 @@ export async function runCalibrationLoop(options: CalibrationLoopOptions): Promi
       recordedMock,
       onEvent: options.onEvent,
     });
-    await curatorSession.run(
+    const curatorResult = await curatorSession.run(
       buildKnowledgeCuratorTaskPrompt({
         commitSha: options.commitSha,
         questions: questions.map((q) => ({ id: q.id, text: q.text })),
@@ -152,7 +160,7 @@ export async function runCalibrationLoop(options: CalibrationLoopOptions): Promi
 
     const { answers, patches } = options.mock
       ? synthesizeMockCurationProposal(questions, knownShardPaths)
-      : { answers: [] as Answer[], patches: [] as CurationPatch[] };
+      : resolveCurationProposalFromAgent(curatorResult.result, questions, knownShardPaths);
     lastCurationPatches = patches;
 
     await writeAndHandoff(
@@ -173,7 +181,7 @@ export async function runCalibrationLoop(options: CalibrationLoopOptions): Promi
       recordedMock,
       onEvent: options.onEvent,
     });
-    await auditorSession.run(
+    const auditorResult = await auditorSession.run(
       buildKnowledgeAuditorTaskPrompt({
         commitSha: options.commitSha,
         answerCount: answers.length,
@@ -185,7 +193,7 @@ export async function runCalibrationLoop(options: CalibrationLoopOptions): Promi
 
     const verdict = options.mock
       ? synthesizeMockAuditVerdict(answers, patches, knownShardPaths, minAnswerScore)
-      : { overallPass: false, scores: finalScores, patches: [] as AuditedPatch[] };
+      : resolveAuditVerdictFromAgent(auditorResult.result, patches, minAnswerScore);
 
     await writeAndHandoff(options, auditorSession, "audit-verdict", `${reportsBase}/audit-verdict-round-${round}.json`, {
       commitSha: options.commitSha,
@@ -275,6 +283,120 @@ function clamp(value: number, min: number, max: number): number {
 function mean(values: number[]): number {
   if (values.length === 0) return 0;
   return Math.round((values.reduce((sum, v) => sum + v, 0) / values.length) * 1000) / 1000;
+}
+
+function resolveQuestionsFromAgent(resultText: string | undefined, expectedCount: number): Question[] {
+  const parsed = extractJson<{ questions?: unknown[] }>(resultText);
+  const raw = Array.isArray(parsed?.questions) ? parsed!.questions! : [];
+  return raw.filter(hasIdAndText).map(normalizeQuestion).slice(0, expectedCount);
+}
+
+function hasIdAndText(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return typeof v.id === "string" && typeof v.text === "string" && v.text.length > 0;
+}
+
+const QUESTION_CATEGORIES = ["missed_path", "hallucinated_path", "coverage"] as const;
+
+function normalizeQuestion(value: Record<string, unknown>): Question {
+  const category = QUESTION_CATEGORIES.includes(value.category as (typeof QUESTION_CATEGORIES)[number])
+    ? (value.category as Question["category"])
+    : "coverage";
+  const relatedPaths = Array.isArray(value.relatedPaths)
+    ? value.relatedPaths.filter((p): p is string => typeof p === "string")
+    : [];
+  return { id: value.id as string, text: value.text as string, category, relatedPaths };
+}
+
+function resolveCurationProposalFromAgent(
+  resultText: string | undefined,
+  questions: Question[],
+  knownShardPaths: string[],
+): { answers: Answer[]; patches: CurationPatch[] } {
+  const parsed = extractJson<{ answers?: unknown[]; patches?: unknown[] }>(resultText);
+  const validQuestionIds = new Set(questions.map((q) => q.id));
+  const knownShardSet = new Set(knownShardPaths);
+
+  const answers: Answer[] = (Array.isArray(parsed?.answers) ? parsed!.answers! : [])
+    .filter(isAnswerLike)
+    .filter((a) => validQuestionIds.has(a.questionId as string))
+    .map((a) => ({
+      questionId: a.questionId as string,
+      answer: a.answer as string,
+      citations: (Array.isArray(a.citations) ? a.citations.filter((c): c is string => typeof c === "string") : []).filter((c) =>
+        knownShardSet.has(c),
+      ),
+    }));
+
+  const patches: CurationPatch[] = (Array.isArray(parsed?.patches) ? parsed!.patches! : [])
+    .filter(isPatchLike)
+    .map((p) => ({
+      targetPath: p.targetPath as string,
+      operation: p.operation as CurationPatch["operation"],
+      content: typeof p.content === "string" ? p.content : undefined,
+      tokenDelta: typeof p.tokenDelta === "number" ? p.tokenDelta : undefined,
+    }));
+
+  return { answers, patches };
+}
+
+function isAnswerLike(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return typeof v.questionId === "string" && typeof v.answer === "string";
+}
+
+const PATCH_OPERATIONS = ["replace", "append", "delete", "update_weight"] as const;
+
+function isPatchLike(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return typeof v.targetPath === "string" && PATCH_OPERATIONS.includes(v.operation as (typeof PATCH_OPERATIONS)[number]);
+}
+
+function resolveAuditVerdictFromAgent(
+  resultText: string | undefined,
+  proposedPatches: CurationPatch[],
+  minAnswerScore: number,
+): { overallPass: boolean; scores: AuditScores; patches: AuditedPatch[] } {
+  const parsed = extractJson<{ overallPass?: unknown; scores?: unknown; patches?: unknown[] }>(resultText);
+  const scores = normalizeScores(parsed?.scores);
+  const proposedTargets = new Set(proposedPatches.map((p) => p.targetPath));
+
+  const patches: AuditedPatch[] = (Array.isArray(parsed?.patches) ? parsed!.patches! : [])
+    .filter(isAuditedPatchLike)
+    .filter((p) => proposedTargets.has(p.targetPath as string))
+    .map((p) => ({
+      targetPath: p.targetPath as string,
+      approved: Boolean(p.approved),
+      reason: typeof p.reason === "string" ? p.reason : "",
+    }));
+
+  // Trust the agent's explicit verdict when it gave one; otherwise fall back to the same
+  // pass/fail rule the mock synthesizer uses so behavior stays predictable either way.
+  const overallPass = typeof parsed?.overallPass === "boolean" ? parsed.overallPass : mean(Object.values(scores)) >= minAnswerScore;
+
+  return { overallPass, scores, patches };
+}
+
+function isAuditedPatchLike(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== "object" || value === null) return false;
+  return typeof (value as Record<string, unknown>).targetPath === "string";
+}
+
+function normalizeScores(value: unknown): AuditScores {
+  const v = (typeof value === "object" && value !== null ? value : {}) as Record<string, unknown>;
+  const clamp01 = (key: string) => {
+    const n = v[key];
+    return typeof n === "number" && n >= 0 && n <= 1 ? n : 0;
+  };
+  return {
+    coverage: clamp01("coverage"),
+    precision: clamp01("precision"),
+    citation: clamp01("citation"),
+    tokenEfficiency: clamp01("tokenEfficiency"),
+  };
 }
 
 function synthesizeMockQuestions(

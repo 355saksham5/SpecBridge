@@ -33,15 +33,19 @@ public class SpecBridgeDbContext : DbContext
         base.OnModelCreating(modelBuilder);
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(SpecBridgeDbContext).Assembly);
 
+        // Fail closed: when there is no tenant on the accessor (e.g. a bug drops the org_id
+        // claim), the filter must match zero rows, never every organization's rows. Code
+        // paths that genuinely need cross-tenant access (internal/worker scopes) must opt in
+        // explicitly via IgnoreQueryFilters() plus their own organization check.
         modelBuilder.Entity<BrownfieldJob>()
-            .HasQueryFilter(j => CurrentOrganizationId == null || j.OrganizationId == CurrentOrganizationId);
+            .HasQueryFilter(j => j.OrganizationId == CurrentOrganizationId);
         modelBuilder.Entity<CursorCredential>()
-            .HasQueryFilter(c => CurrentOrganizationId == null || c.OrganizationId == CurrentOrganizationId);
+            .HasQueryFilter(c => c.OrganizationId == CurrentOrganizationId);
         modelBuilder.Entity<GitHubConnection>()
-            .HasQueryFilter(g => CurrentOrganizationId == null || g.OrganizationId == CurrentOrganizationId);
+            .HasQueryFilter(g => g.OrganizationId == CurrentOrganizationId);
         modelBuilder.Entity<JiraConnection>()
-            .HasQueryFilter(j => CurrentOrganizationId == null || j.OrganizationId == CurrentOrganizationId);
+            .HasQueryFilter(j => j.OrganizationId == CurrentOrganizationId);
         modelBuilder.Entity<ConfluenceConnection>()
-            .HasQueryFilter(c => CurrentOrganizationId == null || c.OrganizationId == CurrentOrganizationId);
+            .HasQueryFilter(c => c.OrganizationId == CurrentOrganizationId);
     }
 }

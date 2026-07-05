@@ -33,6 +33,39 @@ All secrets and environment-specific values are supplied at deploy time via **en
 | GHES hosts | `SPECBRIDGE_GitHub__AllowedGhesHosts__0` |
 | Worker repo fallback | `SPECBRIDGE_REPO_PATH` |
 
+## Deploying the Bicep template
+
+[`infra/bicep/main.bicep`](../infra/bicep/main.bicep) provisions Log Analytics, App Insights,
+Service Bus, Storage, Key Vault, PostgreSQL Flexible Server, and both Container Apps, and wires
+the `SPECBRIDGE_*` environment variables above between them automatically. It does **not**
+provision the Entra ID app registration or build/push your container images — do those first:
+
+1. Register an Entra ID (Azure AD) app for the API and note its client ID, tenant ID, and
+   audience (e.g. `api://specbridge`).
+2. Build and push `apps/api` and `apps/knowledge-worker` images to a registry the Container Apps
+   environment can pull from (e.g. Azure Container Registry).
+3. Deploy:
+
+   ```bash
+   az deployment group create \
+     --resource-group <your-rg> \
+     --template-file infra/bicep/main.bicep \
+     --parameters \
+       postgresAdminPassword='<strong-password>' \
+       apiImage='<registry>/specbridge-api:<tag>' \
+       workerImage='<registry>/specbridge-worker:<tag>' \
+       entraClientId='<entra-app-client-id>' \
+       entraTenantId='<entra-tenant-id>' \
+       entraAudience='api://specbridge' \
+       internalEventsApiKey='<32+ char random secret>'
+   ```
+
+The template grants the API's managed identity `Key Vault Secrets User` on the provisioned Key
+Vault (the worker never talks to Key Vault directly — it resolves credentials through the API's
+internal endpoint). Atlassian OAuth still requires the manual steps below and the
+`SPECBRIDGE_Atlassian__ClientSecret` environment variable set out-of-band (it is not wired by
+this template).
+
 ## Atlassian OAuth (Jira / Confluence)
 
 1. Create an OAuth 2.0 (3LO) app in [Atlassian Developer Console](https://developer.atlassian.com/console/myapps/).

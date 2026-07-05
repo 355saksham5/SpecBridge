@@ -52,6 +52,7 @@ public sealed class BrownfieldJobService
     private readonly BundleStorageService _bundleStorage;
     private readonly IValidator<ListJobsQuery> _listQueryValidator;
     private readonly JobProgressWriter _progressWriter;
+    private readonly OrgRateLimiter _rateLimiter;
 
     public BrownfieldJobService(
         SpecBridgeDbContext db,
@@ -62,7 +63,8 @@ public sealed class BrownfieldJobService
         JobArtifactStore artifactStore,
         BundleStorageService bundleStorage,
         IValidator<ListJobsQuery> listQueryValidator,
-        JobProgressWriter progressWriter)
+        JobProgressWriter progressWriter,
+        OrgRateLimiter rateLimiter)
     {
         _db = db;
         _queue = queue;
@@ -73,21 +75,22 @@ public sealed class BrownfieldJobService
         _bundleStorage = bundleStorage;
         _listQueryValidator = listQueryValidator;
         _progressWriter = progressWriter;
+        _rateLimiter = rateLimiter;
     }
 
-    public async Task<(BrownfieldJob? Job, IReadOnlyDictionary<string, string[]>? Errors, int StatusCode, string? Detail)> CreateAsync(
+    public async Task<(BrownfieldJob? Job, IReadOnlyDictionary<string, string[]>? Errors, int StatusCode, string? Detail, TimeSpan? RetryAfter)> CreateAsync(
         CreateBrownfieldJobRequest request,
         CancellationToken cancellationToken = default)
     {
         if (!_tenantContext.TryGetOrganizationId(out var organizationId))
         {
-            return (null, null, StatusCodes.Status403Forbidden, "Missing org_id claim on authenticated principal.");
+            return (null, null, StatusCodes.Status403Forbidden, "Missing org_id claim on authenticated principal.", null);
         }
 
         var validation = await _validator.ValidateAsync(request, cancellationToken);
         if (!validation.IsValid)
         {
-            return (null, validation.ToDictionary(), StatusCodes.Status400BadRequest, null);
+            return (null, ToReadOnlyDictionary(validation), StatusCodes.Status400BadRequest, null, null);
         }
 
         var githubExists = await _db.GitHubConnections
@@ -101,7 +104,7 @@ public sealed class BrownfieldJobService
             return (null, new Dictionary<string, string[]>
             {
                 ["githubConnectionId"] = ["GitHub connection not found for this organization."],
-            }, StatusCodes.Status400BadRequest, null);
+            }, StatusCodes.Status400BadRequest, null, null);
         }
 
         var cursorExists = await _db.CursorCredentials
@@ -115,7 +118,7 @@ public sealed class BrownfieldJobService
             return (null, new Dictionary<string, string[]>
             {
                 ["cursorCredentialId"] = ["Cursor credential not found for this organization."],
-            }, StatusCodes.Status400BadRequest, null);
+            }, StatusCodes.Status400BadRequest, null, null);
         }
 
         if (request.Jira?.ConnectionId is Guid jiraConnectionId)
@@ -131,7 +134,7 @@ public sealed class BrownfieldJobService
                 return (null, new Dictionary<string, string[]>
                 {
                     ["jira.connectionId"] = ["Jira connection not found for this organization."],
-                }, StatusCodes.Status400BadRequest, null);
+                }, StatusCodes.Status400BadRequest, null, null);
             }
         }
 
@@ -148,7 +151,15 @@ public sealed class BrownfieldJobService
         if (duplicateActive)
         {
             return (null, null, StatusCodes.Status409Conflict,
-                "An active job already exists for this repoUrl and branch.");
+                "An active job already exists for this repoUrl and branch.", null);
+        }
+
+        // Charge the rate limit only once the request is otherwise guaranteed to create a
+        // job, so invalid/duplicate requests never consume a concurrency slot.
+        if (!_rateLimiter.TryStartJob(organizationId, out var retryAfter))
+        {
+            return (null, null, StatusCodes.Status429TooManyRequests,
+                "Organization has reached its concurrent job or hourly agent-run limit.", retryAfter);
         }
 
         var jobId = Guid.NewGuid();
@@ -164,8 +175,16 @@ public sealed class BrownfieldJobService
             UpdatedAt = now,
         };
 
-        _db.BrownfieldJobs.Add(job);
-        await _db.SaveChangesAsync(cancellationToken);
+        try
+        {
+            _db.BrownfieldJobs.Add(job);
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+        catch
+        {
+            _rateLimiter.CompleteJob(organizationId);
+            throw;
+        }
 
         _eventHub.Publish(jobId, "phase_started", new { phase = "queued", jobId });
 
@@ -175,7 +194,7 @@ public sealed class BrownfieldJobService
             await _queue.EnqueueAsync(workerMessage, cancellationToken);
         }
 
-        return (job, null, StatusCodes.Status202Accepted, null);
+        return (job, null, StatusCodes.Status202Accepted, null, null);
     }
 
     public async Task<(BrownfieldJob? Job, int StatusCode)> GetByIdAsync(
@@ -200,7 +219,7 @@ public sealed class BrownfieldJobService
         Guid jobId,
         CancellationToken cancellationToken = default)
     {
-        if (!_tenantContext.TryGetOrganizationId(out _))
+        if (!_tenantContext.TryGetOrganizationId(out var organizationId))
         {
             return (false, StatusCodes.Status403Forbidden, "Missing org_id claim on authenticated principal.");
         }
@@ -219,6 +238,7 @@ public sealed class BrownfieldJobService
         job.Status = "cancelled";
         job.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(cancellationToken);
+        _rateLimiter.CompleteJob(organizationId);
 
         _eventHub.Publish(jobId, "phase_started", new { phase = "cancelled", jobId });
 
@@ -237,7 +257,7 @@ public sealed class BrownfieldJobService
         var validation = await _listQueryValidator.ValidateAsync(query, cancellationToken);
         if (!validation.IsValid)
         {
-            return (Array.Empty<BrownfieldJob>(), null, validation.ToDictionary(), StatusCodes.Status400BadRequest);
+            return (Array.Empty<BrownfieldJob>(), null, ToReadOnlyDictionary(validation), StatusCodes.Status400BadRequest);
         }
 
         var dbQuery = _db.BrownfieldJobs
@@ -315,6 +335,11 @@ public sealed class BrownfieldJobService
             ["ts"] = DateTime.UtcNow,
         };
 
+        if (request.EventType == "agent_started")
+        {
+            _rateLimiter.RecordAgentRun(job.OrganizationId);
+        }
+
         var published = _eventHub.Publish(jobId, request.EventType, payload);
         _artifactStore.RecordEvent(jobId, request.EventType, published.DataJson);
         await ApplyEventToJobAsync(job, request.EventType, payload, cancellationToken);
@@ -335,6 +360,10 @@ public sealed class BrownfieldJobService
                 : "Job not found.");
         }
 
+        // Only ever redirect to a SAS URL we mint ourselves against our own blob storage.
+        // Worker/event-supplied bundle URLs must never be redirect targets directly — an
+        // internal event with an attacker-controlled bundleUrl would otherwise turn this
+        // endpoint into an open redirect for every authenticated user of the org.
         var artifacts = _artifactStore.Get(jobId);
         var blobName = job.BundleBlobName ?? artifacts?.BundleBlobName;
         if (!string.IsNullOrWhiteSpace(blobName))
@@ -344,13 +373,6 @@ public sealed class BrownfieldJobService
             {
                 return (sasUrl, StatusCodes.Status302Found, null);
             }
-        }
-
-        if (!string.IsNullOrWhiteSpace(artifacts?.BundleUrl)
-            && Uri.TryCreate(artifacts.BundleUrl, UriKind.Absolute, out var bundleUri)
-            && (bundleUri.Scheme == Uri.UriSchemeHttps || bundleUri.Scheme == Uri.UriSchemeHttp))
-        {
-            return (artifacts.BundleUrl, StatusCodes.Status302Found, null);
         }
 
         if (!string.Equals(job.Status, "completed", StringComparison.OrdinalIgnoreCase))
@@ -398,6 +420,7 @@ public sealed class BrownfieldJobService
         Dictionary<string, object?> payload,
         CancellationToken cancellationToken)
     {
+        var wasTerminal = TerminalJobStatuses.Contains(job.Status);
         job.UpdatedAt = DateTime.UtcNow;
 
         switch (eventType)
@@ -456,6 +479,13 @@ public sealed class BrownfieldJobService
         }
 
         await _db.SaveChangesAsync(cancellationToken);
+
+        // Release the concurrency slot exactly once, on the transition into a terminal
+        // state — guards against a retried/duplicate worker event double-releasing it.
+        if (!wasTerminal && TerminalJobStatuses.Contains(job.Status))
+        {
+            _rateLimiter.CompleteJob(job.OrganizationId);
+        }
     }
 
     private static void ApplyCompletionMetrics(BrownfieldJob job, Dictionary<string, object?> payload)
@@ -713,4 +743,10 @@ public sealed class BrownfieldJobService
             _ => false,
         };
     }
+
+    // FluentValidation's ValidationResult.ToDictionary() returns IDictionary<,>, which the
+    // compiler won't implicitly convert to the IReadOnlyDictionary<,> our contracts expose —
+    // copy it into a concrete Dictionary, which implements both.
+    private static IReadOnlyDictionary<string, string[]> ToReadOnlyDictionary(FluentValidation.Results.ValidationResult validation) =>
+        new Dictionary<string, string[]>(validation.ToDictionary());
 }

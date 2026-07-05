@@ -18,6 +18,7 @@ import {
 import type { EmitFn } from "./bootstrap-pipeline.js";
 import { emit } from "./bootstrap-pipeline.js";
 import { runCalibrationLoop } from "./calibration-pipeline.js";
+import { resolveTextArtifact } from "./agent-artifact-resolution.js";
 
 export type JiraEnrichmentOptions = {
   /** Pre-resolved Authorization header value (`Bearer …` / `Basic …`). Never a raw secret name. */
@@ -221,6 +222,16 @@ async function processJiraLinkedCommit(
   const absoluteOutputPath = join(ctx.workspaceDir, outputPath);
   if (ctx.mock) {
     await synthesizeRetroFeatureSpec(absoluteOutputPath, jiraKey, commit, issue, changedPaths);
+  } else {
+    // The agent may have written the spec directly (its cwd is the cloned repo, per the task
+    // prompt's "Write the result to: ..." instruction) or returned it as response text — either
+    // way, stage the real content into the workspace the bundle packer reads from.
+    await resolveTextArtifact({
+      repoPath: ctx.repoPath,
+      workspaceDir: ctx.workspaceDir,
+      relativePath: outputPath,
+      agentResponseText: result.result,
+    });
   }
 
   await session.writeHandoff(outputPath, result.result ?? "", commit.sha);

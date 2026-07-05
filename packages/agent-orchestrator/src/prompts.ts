@@ -139,6 +139,11 @@ export function buildQuestionProberTaskPrompt(input: QuestionProberTaskInput): s
     "Questions only — no answers. Ground each question in a specific missed or hallucinated path",
     "where possible; fill remaining questions with adversarial probes about the current knowledge",
     "store's coverage, using the probing style in your system prompt.",
+    "",
+    ...jsonResponseInstructions(
+      `{"questions": [{"id": "q1", "text": "...", "category": "missed_path" | "hallucinated_path" | "coverage", "relatedPaths": ["..."]}]}`,
+      `Produce exactly ${input.questionCount} entries in "questions", each with a unique "id".`,
+    ),
   ].join("\n");
 }
 
@@ -166,6 +171,11 @@ export function buildKnowledgeCuratorTaskPrompt(input: KnowledgeCuratorTaskInput
     "For each question, cite the shard path(s) your answer is grounded in. Propose shard patches",
     "(replace/append/delete/update_weight) only where they measurably improve retrieval fidelity —",
     "do not patch speculatively.",
+    "",
+    ...jsonResponseInstructions(
+      `{"answers": [{"questionId": "q1", "answer": "...", "citations": ["path/to/shard.md"]}], "patches": [{"targetPath": "path/to/shard.md", "operation": "replace" | "append" | "delete" | "update_weight", "content": "...", "tokenDelta": 0}]}`,
+      `Include exactly one "answers" entry per question id listed above. Omit "patches" entries you are not proposing.`,
+    ),
   ]
     .filter(Boolean)
     .join("\n");
@@ -193,7 +203,24 @@ export function buildKnowledgeAuditorTaskPrompt(input: KnowledgeAuditorTaskInput
     "Check citation validity, estimate each patch's token budget impact, and score coverage,",
     "precision, citation validity, and token efficiency independently. Approve or reject each",
     "patch individually — do not block the whole batch on one bad patch.",
+    "",
+    ...jsonResponseInstructions(
+      `{"overallPass": true | false, "scores": {"coverage": 0.0, "precision": 0.0, "citation": 0.0, "tokenEfficiency": 0.0}, "patches": [{"targetPath": "path/to/shard.md", "approved": true | false, "reason": "..."}]}`,
+      `Set "overallPass" to true only if the mean of the four scores is at least ${input.minAnswerScore}. Include exactly one "patches" entry per patch under review.`,
+    ),
   ].join("\n");
+}
+
+/** Shared trailer that pushes agents toward a single, parseable JSON response. */
+function jsonResponseInstructions(shape: string, extra: string): string[] {
+  return [
+    "## Response format (required)",
+    "Respond with ONLY a single JSON object — no markdown code fence, no commentary before or",
+    "after it. If you also write the artifact to a file, still repeat the same JSON as your",
+    "final response text so the pipeline can ingest it directly. Shape:",
+    shape,
+    extra,
+  ];
 }
 
 export function buildFeatureHistorianTaskPrompt(input: FeatureHistorianTaskInput): string {
@@ -217,5 +244,8 @@ export function buildFeatureHistorianTaskPrompt(input: FeatureHistorianTaskInput
     input.changedPaths.length ? input.changedPaths.map((p) => `- ${p}`).join("\n") : "(no changed paths recorded)",
     "",
     `Write the result to: ${input.outputPath}`,
+    "Whether or not your tools can write that file, your final response text must also be the",
+    "complete Markdown content of the spec — no extra commentary before or after it — so the",
+    "pipeline can persist it even if the file write did not happen.",
   ].join("\n");
 }

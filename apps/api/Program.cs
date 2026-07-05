@@ -50,6 +50,7 @@ if (!string.IsNullOrEmpty(keyVaultUri))
 
 builder.Services.AddSingleton<GhesHostRegistry>();
 builder.Services.AddSingleton<JobCancellationRegistry>();
+builder.Services.AddSingleton<OrgRateLimiter>();
 builder.Services.AddSingleton<BrownfieldJobQueue>();
 builder.Services.AddSingleton<RepoPreflightService>();
 builder.Services.AddSingleton<JobEventHub>();
@@ -257,9 +258,10 @@ app.MapGet("/v1/brownfield-jobs", async (
 app.MapPost("/v1/brownfield-jobs", async (
     CreateBrownfieldJobRequest request,
     BrownfieldJobService jobs,
+    HttpContext http,
     CancellationToken cancellationToken) =>
 {
-    var (job, errors, statusCode, detail) = await jobs.CreateAsync(request, cancellationToken);
+    var (job, errors, statusCode, detail, retryAfter) = await jobs.CreateAsync(request, cancellationToken);
 
     if (errors is not null)
     {
@@ -269,6 +271,16 @@ app.MapPost("/v1/brownfield-jobs", async (
     if (statusCode == StatusCodes.Status409Conflict)
     {
         return Results.Conflict(new { title = "Conflict", detail });
+    }
+
+    if (statusCode == StatusCodes.Status429TooManyRequests)
+    {
+        if (retryAfter is { } wait)
+        {
+            http.Response.Headers["Retry-After"] = ((int)Math.Ceiling(wait.TotalSeconds)).ToString();
+        }
+
+        return Results.Json(new { title = "Rate limit exceeded", detail }, statusCode: statusCode);
     }
 
     if (job is null)

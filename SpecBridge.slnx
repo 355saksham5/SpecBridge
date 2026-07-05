@@ -3,4 +3,7 @@
   <Folder Name="/apps/api/">
     <Project Path="apps/api/SpecBridge.Api.csproj" />
   </Folder>
+  <Folder Name="/apps/api/tests/">
+    <Project Path="apps/api/tests/SpecBridge.Api.Tests/SpecBridge.Api.Tests.csproj" />
+  </Folder>
 </Solution>

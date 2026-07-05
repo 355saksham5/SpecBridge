@@ -50,7 +50,7 @@ public sealed class IntegrationsService
         var validation = await _cursorValidator.ValidateAsync(request, cancellationToken);
         if (!validation.IsValid)
         {
-            return (null, validation.ToDictionary(), StatusCodes.Status400BadRequest, null);
+            return (null, ToReadOnlyDictionary(validation), StatusCodes.Status400BadRequest, null);
         }
 
         if (_secretClient is null)
@@ -121,7 +121,7 @@ public sealed class IntegrationsService
         var validation = await _githubValidator.ValidateAsync(request, cancellationToken);
         if (!validation.IsValid)
         {
-            return (null, validation.ToDictionary(), StatusCodes.Status400BadRequest);
+            return (null, ToReadOnlyDictionary(validation), StatusCodes.Status400BadRequest);
         }
 
         var webUrl = request.WebUrl.Trim().TrimEnd('/');
@@ -177,7 +177,7 @@ public sealed class IntegrationsService
         ConnectAtlassianRequest request,
         CancellationToken cancellationToken = default)
     {
-        return await ConnectAtlassianAsync(
+        return await ConnectAtlassianAsync<JiraConnection>(
             request,
             (organizationId, connectionId, baseUrl, secretName) => new JiraConnection
             {
@@ -194,7 +194,7 @@ public sealed class IntegrationsService
         ConnectAtlassianRequest request,
         CancellationToken cancellationToken = default)
     {
-        return await ConnectAtlassianAsync(
+        return await ConnectAtlassianAsync<ConfluenceConnection>(
             request,
             (organizationId, connectionId, baseUrl, secretName) => new ConfluenceConnection
             {
@@ -209,7 +209,7 @@ public sealed class IntegrationsService
 
     private async Task<(TConnection? Connection, IReadOnlyDictionary<string, string[]>? Errors, int StatusCode, string? Detail)> ConnectAtlassianAsync<TConnection>(
         ConnectAtlassianRequest request,
-        Func<(Guid organizationId, Guid connectionId, string url, string secretName), TConnection> factory,
+        Func<Guid, Guid, string, string, TConnection> factory,
         CancellationToken cancellationToken) where TConnection : class
     {
         if (!_tenantContext.TryGetOrganizationId(out var organizationId))
@@ -220,7 +220,7 @@ public sealed class IntegrationsService
         var validation = await _atlassianValidator.ValidateAsync(request, cancellationToken);
         if (!validation.IsValid)
         {
-            return (null, validation.ToDictionary(), StatusCodes.Status400BadRequest, null);
+            return (null, ToReadOnlyDictionary(validation), StatusCodes.Status400BadRequest, null);
         }
 
         if (_secretClient is null)
@@ -259,7 +259,7 @@ public sealed class IntegrationsService
             ? "https://atlassian.net"
             : request.BaseUrl.Trim().TrimEnd('/');
 
-        var entity = factory((organizationId, connectionId, baseUrl, secretName));
+        var entity = factory(organizationId, connectionId, baseUrl, secretName);
 
         if (entity is JiraConnection jira)
         {
@@ -273,4 +273,10 @@ public sealed class IntegrationsService
         await _db.SaveChangesAsync(cancellationToken);
         return (entity, null, StatusCodes.Status201Created, null);
     }
+
+    // FluentValidation's ValidationResult.ToDictionary() returns IDictionary<,>, which the
+    // compiler won't implicitly convert to the IReadOnlyDictionary<,> our contracts expose —
+    // copy it into a concrete Dictionary, which implements both.
+    private static IReadOnlyDictionary<string, string[]> ToReadOnlyDictionary(FluentValidation.Results.ValidationResult validation) =>
+        new Dictionary<string, string[]>(validation.ToDictionary());
 }

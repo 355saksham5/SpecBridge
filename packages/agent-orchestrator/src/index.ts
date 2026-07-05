@@ -30,3 +30,4 @@ export {
 export { AgentSession, createAgentSession, runAgentTask, runKnowledgeArchitect } from "./agent-session.js";
 export { lookupRecordedResponse, listRecordedFixtures } from "./recorded-mock.js";
 export type { RecordedAgentResponse } from "./recorded-mock.js";
+export { extractJson } from "./response-parser.js";

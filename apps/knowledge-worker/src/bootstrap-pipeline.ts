@@ -21,6 +21,7 @@ import {
 } from "@specbridge/agent-orchestrator";
 import { packBundle, vendorSddKit, computeTokenReduction } from "@specbridge/bundle-packer";
 import { ConfluenceClient, buildConfluenceContext } from "@specbridge/confluence-client";
+import { syncAgentDirectory } from "./agent-artifact-resolution.js";
 
 export const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 
@@ -169,6 +170,12 @@ export async function bootstrapKnowledgeAtHead(options: BootstrapJobOptions): Pr
 
   if (mock) {
     await synthesizeBootstrapArtifacts(workspaceDir, options);
+  } else {
+    // The agent's cwd is the cloned repo (per the task prompt's "Write truth docs to .sdd/docs/
+    // ..." instruction), not the bundle staging workspace — copy whatever it wrote across so the
+    // manifest/bundle-packer steps below see the real output instead of an empty knowledge store.
+    await syncAgentDirectory({ repoPath: options.repoPath, workspaceDir, relativeDir: join(".sdd", "docs") });
+    await syncAgentDirectory({ repoPath: options.repoPath, workspaceDir, relativeDir: join(".sdd", "knowledge") });
   }
 
   await vendorSddKit(sddKit.sourceDir, workspaceDir);
